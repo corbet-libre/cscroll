@@ -120,6 +120,7 @@ if scdoc.found()
 	scdoc_prog = find_program(scdoc.get_variable(pkgconfig: 'scdoc'), native: true)
 	mandir = get_option('mandir')
 	man_files = [
+		'ipc-compat/scroll-swayipc-compat.1.scd',
 		'sway/scroll.1.scd',
 		'sway/scroll.5.scd',
 		'sway/scroll-bar.5.scd',
@@ -246,6 +247,7 @@ if get_option('default-wallpaper')
 endif
 
 subdir('completions')
+subdir('ipc-compat')
 subdir('tests')
 
 summary({

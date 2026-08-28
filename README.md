@@ -1,4 +1,20 @@
-# scroll
+# cscroll
+
+`cscroll` is a deliberately close downstream of
+[scroll](https://github.com/dawsers/scroll). It ships the upstream `scroll` and
+`scrollmsg` runtime together with only the small runtime repairs that cannot yet
+be consumed upstream. Nix integration and machine-specific configuration live
+outside this repository.
+
+The only current downstream runtime helper is `scroll-swayipc-compat`. It
+proxies Scroll's IPC socket for strict Sway-schema clients and translates the
+lossless layout-name pairs `horizontal` to `splith` and `vertical` to `splitv`.
+It does not invent workspaces, rewrite workspace IDs, or implement favourites;
+that is client policy rather than protocol compatibility.
+
+See [UPSTREAM.md](UPSTREAM.md) for the downstream ledger and sync procedure.
+
+## Upstream Scroll documentation
 
 <img width="256" height="256" src="https://github.com/dawsers/scroll/blob/master/scroll.png" />
 
