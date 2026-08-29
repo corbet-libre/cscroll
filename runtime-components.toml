@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+# Canonical runtime bundle. Packaging integrations map these components to the
+# native package manager and install every required entry with cscroll.
+schema = 1
+
+[[component]]
+id = "wallpaper"
+kind = "external-command"
+command = "swaybg"
+required = true
+arch-package = "swaybg"
+nixpkgs-package = "swaybg"
+reason = "scroll invokes swaybg directly for output background directives"
+
+[[component]]
+id = "output-control"
+kind = "external-command"
+command = "wlr-randr"
+required = true
+arch-package = "wlr-randr"
+nixpkgs-package = "wlr-randr"
+reason = "runtime output control uses the protocol implemented by scroll"
+
+[[component]]
+id = "capture-portal"
+kind = "external-service"
+command = "xdg-desktop-portal-wlr"
+required = true
+arch-package = "xdg-desktop-portal-wlr"
+nixpkgs-package = "xdg-desktop-portal-wlr"
+configuration = "resources/scroll-portals.conf"
+reason = "scroll capture is exposed through the wlroots portal backend"
+
+[[component]]
+id = "xwayland"
+kind = "external-command"
+command = "Xwayland"
+required = true
+arch-package = "xorg-xwayland"
+nixpkgs-package = "xwayland"
+reason = "scroll embeds the Xwayland server for X11 clients"
+
+[[component]]
+id = "sway-ipc-compat"
+kind = "bundled-command"
+command = "scroll-swayipc-compat"
+required = true
+temporary = true
+reason = "strict sway-schema clients need the bridge until native adapters replace it"

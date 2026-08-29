@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  downstream:
+    name: downstream runtime contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test the strict-Sway IPC bridge
+        run: python3 -m unittest discover -s tests -p 'test_swayipc_compat.py' -v
+
+      - name: Validate the runtime-component manifest
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path.cwd()
+          manifest = tomllib.loads((root / "runtime-components.toml").read_text())
+          assert manifest["schema"] == 1
+          components = manifest["component"]
+          ids = [component["id"] for component in components]
+          assert len(ids) == len(set(ids))
+          assert set(ids) == {
+              "wallpaper",
+              "output-control",
+              "capture-portal",
+              "xwayland",
+              "sway-ipc-compat",
+          }
+          assert all(component["required"] for component in components)
+          external = [c for c in components if c["kind"] != "bundled-command"]
+          assert all(c.get("arch-package") and c.get("nixpkgs-package") for c in external)
+          bundled = next(c for c in components if c["id"] == "sway-ipc-compat")
+          assert bundled["command"] == "scroll-swayipc-compat"
+          assert bundled["temporary"] is True
+          assert (root / "resources/scroll-portals.conf").is_file()
+          PY
+
+  source-boundary:
+    name: source boundary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Keep downstream products out of the compositor source
+        run: |
+          test ! -e flake.nix
+          test ! -e flake.lock
+          ! git ls-files | grep -E '(^|/)(nixscroll|home/richc)(/|$)'
+          test -x ipc-compat/scroll-swayipc-compat
+          test -f runtime-components.toml

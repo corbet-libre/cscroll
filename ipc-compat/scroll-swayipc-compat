@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Expose Scroll IPC to clients that strictly deserialize Sway layout names.
+# SPDX-License-Identifier: Apache-2.0
+"""Expose scroll IPC to clients that strictly deserialize Sway workspace data.
 
 Only the two lossless schema aliases are translated, and only in the
 compositor-to-client direction:
@@ -7,13 +8,14 @@ compositor-to-client direction:
     horizontal -> splith
     vertical   -> splitv
 
-The proxy deliberately does not synthesize workspaces, rewrite IDs, or retain
-empty-workspace events. Those are client policy, not protocol compatibility.
+Optional favourites keep numbered workspace buttons usable for clients whose
+workspace model requires a currently resolvable container ID.
 """
 
 import argparse
 import asyncio
 import glob
+import json
 import os
 import re
 import socket
@@ -25,6 +27,8 @@ import sys
 MAGIC = b"i3-ipc"
 HEADER_SIZE = len(MAGIC) + 8
 DEFAULT_SOCKET_NAME = "scroll-swaycompat.sock"
+GET_WORKSPACES = 1
+EVENT_WORKSPACE = 0x80000000
 
 LAYOUT_ALIASES = (
     (re.compile(rb'"layout"\s*:\s*"horizontal"'), b'"layout":"splith"'),
@@ -33,9 +37,84 @@ LAYOUT_ALIASES = (
 
 
 def rewrite_layouts(payload: bytes) -> bytes:
-    """Translate Scroll-only layout values into their Sway schema aliases."""
+    """Translate scroll-only layout values into their Sway schema aliases."""
     for pattern, replacement in LAYOUT_ALIASES:
         payload = pattern.sub(replacement, payload)
+    return payload
+
+
+def rekey_workspace(workspace: dict) -> dict:
+    """Give numbered workspaces the stable ID strict clients derive by name."""
+    number = workspace.get("num")
+    if isinstance(number, int) and number > 0:
+        workspace["id"] = number
+    return workspace
+
+
+def synthesize_favourites(workspaces: list[dict], favourites: tuple[int, ...]) -> list[dict]:
+    """Add inactive entries for configured numbered workspaces not yet present."""
+    if not workspaces or not favourites:
+        return workspaces
+
+    present = {workspace.get("num") for workspace in workspaces}
+    template = next(
+        (workspace for workspace in workspaces if workspace.get("focused")),
+        workspaces[0],
+    )
+    result = list(workspaces)
+    for number in favourites:
+        if number in present:
+            continue
+        placeholder = json.loads(json.dumps(template))
+        placeholder.update(
+            {
+                "id": number,
+                "num": number,
+                "name": str(number),
+                "focused": False,
+                "visible": False,
+                "urgent": False,
+            }
+        )
+        for field in ("nodes", "floating_nodes"):
+            if field in placeholder:
+                placeholder[field] = []
+        if "representation" in placeholder:
+            placeholder["representation"] = None
+        result.append(placeholder)
+
+    result.sort(key=lambda workspace: (workspace.get("num", 0) < 0, workspace.get("num", 0)))
+    return result
+
+
+def rewrite_response(
+    message_type: int,
+    payload: bytes,
+    favourites: tuple[int, ...] = (),
+) -> bytes | None:
+    """Translate Scroll schema seams and optionally preserve favourite workspaces."""
+    payload = rewrite_layouts(payload)
+    if not favourites:
+        return payload
+
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return payload
+
+    if message_type == GET_WORKSPACES and isinstance(data, list):
+        workspaces = [rekey_workspace(workspace) for workspace in data]
+        return json.dumps(synthesize_favourites(workspaces, favourites)).encode()
+
+    if message_type == EVENT_WORKSPACE and isinstance(data, dict):
+        current = data.get("current") or {}
+        if data.get("change") == "empty" and current.get("num") in favourites:
+            return None
+        for field in ("current", "old"):
+            if isinstance(data.get(field), dict):
+                data[field] = rekey_workspace(data[field])
+        return json.dumps(data).encode()
+
     return payload
 
 
@@ -58,12 +137,15 @@ async def pump(
     writer: asyncio.StreamWriter,
     *,
     rewrite: bool,
+    favourites: tuple[int, ...] = (),
 ) -> None:
     try:
         while True:
             message_type, payload = await read_frame(reader)
             if rewrite:
-                payload = rewrite_layouts(payload)
+                payload = rewrite_response(message_type, payload, favourites)
+                if payload is None:
+                    continue
             writer.write(frame(message_type, payload))
             await writer.drain()
     except (
@@ -80,7 +162,7 @@ async def pump(
 def upstream_candidates(listen: str, explicit: tuple[str, ...] = ()) -> list[str]:
     """Return upstream paths in priority order, excluding the proxy itself.
 
-    Candidates are resolved for every client connection. Scroll's socket name
+    Candidates are resolved for every client connection. scroll's socket name
     contains its PID, so caching a path would break after a compositor restart.
     """
     candidates: list[str] = []
@@ -129,6 +211,7 @@ async def handle(
     client_writer: asyncio.StreamWriter,
     listen: str,
     explicit: tuple[str, ...] = (),
+    favourites: tuple[int, ...] = (),
 ) -> None:
     upstream = await connect_upstream(listen, explicit)
     if upstream is None:
@@ -137,7 +220,7 @@ async def handle(
     upstream_reader, upstream_writer = upstream
     await asyncio.gather(
         pump(client_reader, upstream_writer, rewrite=False),
-        pump(upstream_reader, client_writer, rewrite=True),
+        pump(upstream_reader, client_writer, rewrite=True, favourites=favourites),
     )
 
 
@@ -180,7 +263,7 @@ def remove_stale_socket(path: str) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="proxy Scroll IPC for strict Sway-schema clients"
+        description="proxy scroll IPC for strict Sway-schema clients"
     )
     parser.add_argument(
         "listen",
@@ -192,9 +275,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="SOCKET",
-        help="explicit Scroll socket; may be repeated and is tried before the environment",
+        help="explicit scroll socket; may be repeated and is tried before the environment",
+    )
+    parser.add_argument(
+        "--favorite",
+        action="append",
+        default=[],
+        type=positive_workspace_number,
+        metavar="WORKSPACE",
+        help="retain a numbered workspace for strict workspace clients; may be repeated",
     )
     return parser.parse_args(argv)
+
+
+def positive_workspace_number(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("workspace number must be positive")
+    return number
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -207,8 +305,12 @@ async def run(args: argparse.Namespace) -> None:
 
     remove_stale_socket(listen)
     explicit = tuple(args.upstream)
+    favourites = tuple(dict.fromkeys(args.favorite))
     server = await asyncio.start_unix_server(
-        lambda reader, writer: handle(reader, writer, listen, explicit), path=listen
+        lambda reader, writer: handle(
+            reader, writer, listen, explicit, favourites
+        ),
+        path=listen,
     )
     print(
         f"scroll-swayipc-compat: listening on {listen}; "

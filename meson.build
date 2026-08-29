@@ -2,7 +2,7 @@ project(
 	'scroll',
 	'c',
 	version: '1.13-dev',
-	license: 'MIT',
+	license: ['MIT', 'Apache-2.0'],
 	meson_version: '>=1.3',
 	default_options: [
 		'c_std=c11',
@@ -223,6 +223,11 @@ configure_file(
 install_data(
 	'scroll.desktop',
 	install_dir: join_paths(datadir, 'wayland-sessions')
+)
+
+install_data(
+	'resources/scroll-portals.conf',
+	install_dir: join_paths(datadir, 'xdg-desktop-portal')
 )
 
 install_data(

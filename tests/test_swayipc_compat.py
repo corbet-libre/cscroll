@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import asyncio
 import importlib.machinery
 import importlib.util
@@ -40,21 +41,70 @@ class LayoutRewriteTests(unittest.TestCase):
         self.assertEqual(length, len(rewritten))
         self.assertEqual(framed[compat.HEADER_SIZE :], rewritten)
 
-    def test_workspace_data_is_not_synthesized_or_rekeyed(self):
+    def test_workspace_data_is_unchanged_without_favourites(self):
         payload = json.dumps(
             [{"id": 77, "num": 1, "name": "1", "layout": "vertical"}]
         ).encode()
 
-        rewritten = json.loads(compat.rewrite_layouts(payload))
+        rewritten = json.loads(compat.rewrite_response(compat.GET_WORKSPACES, payload))
 
         self.assertEqual(len(rewritten), 1)
         self.assertEqual(rewritten[0]["id"], 77)
         self.assertEqual(rewritten[0]["num"], 1)
         self.assertEqual(rewritten[0]["layout"], "splitv")
 
-    def test_workspace_events_without_layout_are_byte_identical(self):
+    def test_workspace_events_are_byte_identical_without_favourites(self):
         payload = b'{"change":"empty","current":{"id":91,"num":5}}'
-        self.assertEqual(compat.rewrite_layouts(payload), payload)
+        self.assertEqual(
+            compat.rewrite_response(compat.EVENT_WORKSPACE, payload), payload
+        )
+
+    def test_favourites_are_rekeyed_and_synthesized(self):
+        payload = json.dumps(
+            [
+                {
+                    "id": 77,
+                    "num": 1,
+                    "name": "1",
+                    "focused": True,
+                    "visible": True,
+                    "urgent": False,
+                    "nodes": [{"id": 88}],
+                    "floating_nodes": [{"id": 89}],
+                    "representation": "H[]",
+                }
+            ]
+        ).encode()
+
+        rewritten = json.loads(
+            compat.rewrite_response(compat.GET_WORKSPACES, payload, (1, 2, 5))
+        )
+
+        self.assertEqual([workspace["num"] for workspace in rewritten], [1, 2, 5])
+        self.assertEqual([workspace["id"] for workspace in rewritten], [1, 2, 5])
+        self.assertTrue(rewritten[0]["focused"])
+        self.assertEqual(rewritten[1]["nodes"], [])
+        self.assertEqual(rewritten[1]["floating_nodes"], [])
+        self.assertIsNone(rewritten[1]["representation"])
+
+    def test_empty_event_for_favourite_is_suppressed(self):
+        payload = b'{"change":"empty","current":{"id":91,"num":5}}'
+        self.assertIsNone(
+            compat.rewrite_response(compat.EVENT_WORKSPACE, payload, (5,))
+        )
+
+    def test_other_workspace_events_are_rekeyed(self):
+        payload = b'{"change":"focus","current":{"id":91,"num":5}}'
+        rewritten = json.loads(
+            compat.rewrite_response(compat.EVENT_WORKSPACE, payload, (1,))
+        )
+        self.assertEqual(rewritten["current"]["id"], 5)
+
+    def test_favourite_arguments_are_positive_and_deduplicated_at_runtime(self):
+        args = compat.parse_args(["--favorite", "2", "--favorite", "2"])
+        self.assertEqual(args.favorite, [2, 2])
+        with self.assertRaises(SystemExit):
+            compat.parse_args(["--favorite", "0"])
 
 
 class SocketSafetyTests(unittest.TestCase):

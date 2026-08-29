@@ -1,5 +1,13 @@
 # Contributing to sway
 
+## cscroll licensing
+
+Before submitting changes to this downstream, read [LICENSING.md](LICENSING.md).
+New standalone files default to Apache-2.0. A contribution to an inherited or
+otherwise pre-existing file is dual-licensed as `Apache-2.0 OR` that file's
+existing license, so its license and upstream eligibility remain intact. This
+is an inbound license grant, not a copyright assignment.
+
 Contributing just involves sending a pull request. You will probably be more
 successful with your contribution if you visit #sway-devel on Libera Chat
 upfront and discuss your plans.
