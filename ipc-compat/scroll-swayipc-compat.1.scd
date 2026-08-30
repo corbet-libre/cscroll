@@ -46,7 +46,7 @@ The listen socket itself is always excluded.
 # OPTIONS
 
 *--favorite* _WORKSPACE_
-	Retain a positive numbered workspace for strict workspace clients. May be
+	Retain a non-negative numbered workspace for strict workspace clients. May be
 	repeated. Duplicate values are ignored.
 
 *--upstream* _SOCKET_

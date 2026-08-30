@@ -77,15 +77,23 @@ class LayoutRewriteTests(unittest.TestCase):
         ).encode()
 
         rewritten = json.loads(
-            compat.rewrite_response(compat.GET_WORKSPACES, payload, (1, 2, 5))
+            compat.rewrite_response(compat.GET_WORKSPACES, payload, (0, 1, 2, 5))
         )
 
-        self.assertEqual([workspace["num"] for workspace in rewritten], [1, 2, 5])
-        self.assertEqual([workspace["id"] for workspace in rewritten], [1, 2, 5])
-        self.assertTrue(rewritten[0]["focused"])
-        self.assertEqual(rewritten[1]["nodes"], [])
-        self.assertEqual(rewritten[1]["floating_nodes"], [])
-        self.assertIsNone(rewritten[1]["representation"])
+        self.assertEqual([workspace["num"] for workspace in rewritten], [0, 1, 2, 5])
+        self.assertEqual([workspace["id"] for workspace in rewritten], [0, 1, 2, 5])
+        self.assertTrue(rewritten[1]["focused"])
+        self.assertEqual(rewritten[0]["nodes"], [])
+        self.assertEqual(rewritten[0]["floating_nodes"], [])
+        self.assertIsNone(rewritten[0]["representation"])
+
+    def test_real_workspace_zero_is_rekeyed_like_every_numbered_workspace(self):
+        payload = b'[{"id":77,"num":0,"name":"0"}]'
+        rewritten = json.loads(
+            compat.rewrite_response(compat.GET_WORKSPACES, payload, (0,))
+        )
+
+        self.assertEqual(rewritten, [{"id": 0, "num": 0, "name": "0"}])
 
     def test_empty_event_for_favourite_is_suppressed(self):
         payload = b'{"change":"empty","current":{"id":91,"num":5}}'
@@ -100,11 +108,13 @@ class LayoutRewriteTests(unittest.TestCase):
         )
         self.assertEqual(rewritten["current"]["id"], 5)
 
-    def test_favourite_arguments_are_positive_and_deduplicated_at_runtime(self):
-        args = compat.parse_args(["--favorite", "2", "--favorite", "2"])
-        self.assertEqual(args.favorite, [2, 2])
+    def test_favourite_arguments_are_nonnegative_and_deduplicated_at_runtime(self):
+        args = compat.parse_args(
+            ["--favorite", "0", "--favorite", "2", "--favorite", "0"]
+        )
+        self.assertEqual(args.favorite, [0, 2, 0])
         with self.assertRaises(SystemExit):
-            compat.parse_args(["--favorite", "0"])
+            compat.parse_args(["--favorite", "-1"])
 
 
 class SocketSafetyTests(unittest.TestCase):

@@ -46,7 +46,10 @@ def rewrite_layouts(payload: bytes) -> bytes:
 def rekey_workspace(workspace: dict) -> dict:
     """Give numbered workspaces the stable ID strict clients derive by name."""
     number = workspace.get("num")
-    if isinstance(number, int) and number > 0:
+    # Scroll and the Sway IPC schema both use -1 for a named workspace and permit 0 as a real
+    # numbered workspace. Testing truthiness or requiring > 0 would leave workspace 0 with its
+    # transient container ID while every other configured favourite is keyed by number.
+    if isinstance(number, int) and number >= 0:
         workspace["id"] = number
     return workspace
 
@@ -281,17 +284,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--favorite",
         action="append",
         default=[],
-        type=positive_workspace_number,
+        type=nonnegative_workspace_number,
         metavar="WORKSPACE",
         help="retain a numbered workspace for strict workspace clients; may be repeated",
     )
     return parser.parse_args(argv)
 
 
-def positive_workspace_number(value: str) -> int:
+def nonnegative_workspace_number(value: str) -> int:
     number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("workspace number must be positive")
+    if number < 0:
+        raise argparse.ArgumentTypeError("workspace number must be non-negative")
     return number
 
 
