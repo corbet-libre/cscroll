@@ -912,6 +912,13 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	if (!sway_assert(view->surface == NULL, "cannot map mapped view")) {
 		return;
 	}
+	// A client can remap the same view before its close animation finishes.
+	// Stop fading it out and keep subsequent unmaps from adding duplicates
+	// which would outlive the view after view_destroy removes one entry.
+	int index = list_find(root->unmapped_views, view);
+	if (index >= 0) {
+		list_del(root->unmapped_views, index);
+	}
 	view->lua.mapped = true;
 	view->surface = wlr_surface;
 	view_populate_pid(view);

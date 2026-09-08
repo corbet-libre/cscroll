@@ -10,7 +10,7 @@ git@github.com:dawsers/scroll.git
 ```
 
 The downstream started at scroll `1.12.21`, commit `f80c5820`. It was last
-synchronized to upstream commit `66d0e9d0` (2026-08-28). The local downstream
+synchronized to upstream commit `0087fcfd` (2026-08-31). The local downstream
 branch is `main`; upstream keeps the name `master`.
 
 ## Downstream ledger
@@ -26,6 +26,18 @@ runtime or packages a helper that is tightly coupled to its runtime protocol.
   companions whose lifecycle is coupled to `scroll`.
 - `scroll-portals.conf`: installed portal selection for the capture protocols
   implemented by the wlroots backend.
+- Layer surfaces and popups retain their allocations until outstanding
+  transactions and animations release them. Scene destruction also detaches
+  popup listeners before a parent layer can disappear.
+- Remapped views leave the fade-out list, preventing duplicate entries that
+  would reference freed views after repeated unmap/remap cycles.
+
+The lifetime regressions use real Wayland clients and isolated headless Scroll
+instances. Run them on the build host with AddressSanitizer enabled:
+
+```sh
+python3 tests/check_lifetime.py --scroll build/sway/scroll --client build/tests/lifetime-client
+```
 
 Nix modules, host values, desktop policy, bar or launcher code, and synthetic
 workspace/favourites behaviour do not belong in this repository.

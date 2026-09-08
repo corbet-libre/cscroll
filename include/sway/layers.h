@@ -49,6 +49,7 @@ struct sway_layer_popup {
 	struct sway_layer_surface *toplevel;
 
 	struct wl_listener destroy;
+	struct wl_listener node_destroy;
 	struct wl_listener new_popup;
 	struct wl_listener commit;
 	struct wl_listener reposition;

@@ -225,6 +225,10 @@ static struct sway_layer_surface *find_mapped_layer_by_client(
 static void handle_node_destroy(struct wl_listener *listener, void *data) {
 	struct sway_layer_surface *layer =
 		wl_container_of(listener, layer, node_destroy);
+	// Transactions (including the current animation) retain this allocation
+	// after its protocol and scene objects have gone away.
+	node_set_dirty(&layer->node);
+	layer->node.destroying = true;
 
 	// destroy the scene descriptor straight away if it exists, otherwise
 	// we will try to reflow still considering the destroyed node.
@@ -243,11 +247,6 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
 		}
 	}
 
-	if (layer->output) {
-		arrange_layers(layer->output);
-		transaction_commit_dirty();
-	}
-
 	wlr_scene_node_destroy(&layer->popups->node);
 	list_free(layer->layer_popups);
 
@@ -261,7 +260,11 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
 
 	wl_list_remove(&layer->link);
 	node_map_remove(&layer->node);
-	free(layer);
+	if (layer->output) {
+		arrange_layers(layer->output);
+	}
+	// Commit only after cleanup: this can release the last transaction reference.
+	transaction_commit_dirty();
 }
 
 static void handle_surface_commit(struct wl_listener *listener, void *data) {
@@ -333,21 +336,33 @@ static void handle_unmap(struct wl_listener *listener, void *data) {
 	cursor_rebase_all();
 }
 
-static void popup_handle_destroy(struct wl_listener *listener, void *data) {
+static void popup_handle_node_destroy(struct wl_listener *listener, void *data) {
 	struct sway_layer_popup *popup =
-		wl_container_of(listener, popup, destroy);
+		wl_container_of(listener, popup, node_destroy);
 	struct sway_layer_surface *surface = popup->toplevel;
+	node_set_dirty(&popup->node);
+	popup->node.destroying = true;
 	int idx = list_find(surface->layer_popups, popup);
 	if (idx >= 0) {
 		list_del(surface->layer_popups, idx);
 	}
 
 	wl_list_remove(&popup->destroy.link);
+	wl_list_remove(&popup->node_destroy.link);
 	wl_list_remove(&popup->new_popup.link);
 	wl_list_remove(&popup->commit.link);
 	wl_list_remove(&popup->reposition.link);
 	node_map_remove(&popup->node);
-	free(popup);
+	// A parent layer commits once its entire popup tree has been detached.
+	if (!surface->node.destroying) {
+		transaction_commit_dirty();
+	}
+}
+
+static void popup_handle_destroy(struct wl_listener *listener, void *data) {
+	struct sway_layer_popup *popup =
+		wl_container_of(listener, popup, destroy);
+	wlr_scene_node_destroy(&popup->scene->node);
 }
 
 static void popup_unconstrain(struct sway_layer_popup *popup) {
@@ -417,12 +432,15 @@ static struct sway_layer_popup *create_popup(struct wlr_xdg_popup *wlr_popup,
 		wlr_popup->base);
 
 	if (!popup->scene) {
+		node_map_remove(&popup->node);
 		free(popup);
 		return NULL;
 	}
 
 	popup->destroy.notify = popup_handle_destroy;
 	wl_signal_add(&wlr_popup->events.destroy, &popup->destroy);
+	popup->node_destroy.notify = popup_handle_node_destroy;
+	wl_signal_add(&popup->scene->node.events.destroy, &popup->node_destroy);
 	popup->new_popup.notify = popup_handle_new_popup;
 	wl_signal_add(&wlr_popup->base->events.new_popup, &popup->new_popup);
 	popup->commit.notify = popup_handle_commit;

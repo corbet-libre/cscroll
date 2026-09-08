@@ -78,9 +78,13 @@ void transaction_destroy(struct sway_transaction *transaction) {
 		if (node->destroying && node->ntxnrefs == 0 && !node->dirty) {
 			switch (node->type) {
 			case N_ROOT:
-			case N_LAYER_SURFACE:
-			case N_LAYER_POPUP:
 				sway_assert(false, "Never reached");
+				break;
+			case N_LAYER_SURFACE:
+				free(node->sway_layer_surface);
+				break;
+			case N_LAYER_POPUP:
+				free(node->sway_layer_popup);
 				break;
 			case N_OUTPUT:
 				output_destroy(node->sway_output);
@@ -1877,10 +1881,14 @@ static void set_animation_data(struct sway_transaction *transaction) {
 			break;
 			}
 		case N_LAYER_SURFACE:
-			animation_add_output(node->sway_layer_surface->output->wlr_output);
+			if (!node->destroying && node->sway_layer_surface->output) {
+				animation_add_output(node->sway_layer_surface->output->wlr_output);
+			}
 			break;
 		case N_LAYER_POPUP:
-			animation_add_output(node->sway_layer_popup->toplevel->output->wlr_output);
+			if (!node->destroying && node->sway_layer_popup->toplevel->output) {
+				animation_add_output(node->sway_layer_popup->toplevel->output->wlr_output);
+			}
 			break;
 		}
 	}

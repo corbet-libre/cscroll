@@ -6,6 +6,14 @@ executable(
 	install: false,
 )
 
+executable(
+	'lifetime-client',
+	files('clients/lifetime-client.c'),
+	dependencies: [wayland_client],
+	sources: wl_protos_src,
+	install: false,
+)
+
 xcb_dep = dependency('xcb', required: false)
 if xcb_dep.found()
 	executable(
@@ -15,6 +23,4 @@ if xcb_dep.found()
 		install: false,
 	)
 endif
-
-
 
