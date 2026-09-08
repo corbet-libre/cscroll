@@ -11,6 +11,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  runtime:
+    name: compositor runtime under AddressSanitizer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v27
+      # Packaging stays in nixscroll. Override only the runtime source with
+      # this exact checkout so every cscroll change runs the real regressions.
+      - name: Build and run compositor regressions
+        run: >-
+          nix build
+          github:julian-corbet/nixscroll-corbet-ch/6c1f986344d6034236e4b1674a41af0081711373#checks.x86_64-linux.runtime-lifetime
+          --override-input cscroll "git+file://$PWD"
+          --no-write-lock-file --no-link --print-build-logs
+
   downstream:
     name: downstream runtime contract
     runs-on: ubuntu-24.04
