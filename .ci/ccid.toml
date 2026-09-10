@@ -1,0 +1,8 @@
+schema = 1
+project = "cscroll"
+
+# IPC compatibility only. Full compositor runtime lives in pinned nixscroll native/VM gates; this product deliberately has no flake.
+
+[checks.ipc]
+kind = "commands"
+commands = [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_swayipc_compat.py", "-v"]]
