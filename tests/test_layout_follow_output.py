@@ -5,6 +5,41 @@ import pytest
 from test_utils import run_compositor, wayland_client, wait_for_client_map
 
 
+@pytest.mark.parametrize("primary,pivot,output_count", [
+    ("HEADLESS-1", "HEADLESS-2", 3),
+    ("HEADLESS-1", "missing-hp", 2),
+    ("missing-dell", "HEADLESS-1", 2),
+    ("missing-dell", "missing-hp", 2),
+])
+def test_default_workspaces_respect_output_priorities(
+        scroll_compositor_binary, tmp_path, monkeypatch, primary, pivot, output_count):
+    monkeypatch.setenv("WLR_HEADLESS_OUTPUTS", str(output_count))
+    config = "\n".join([
+        "xwayland disable",
+        "animations enabled no",
+        "default_orientation horizontal",
+        "layout_follow_output yes",
+        f"output {pivot} layout_type vertical",
+        *[f"bindsym Mod4+{n} workspace number {n}" for n in range(8)],
+        *[f"workspace {n} output {primary}" for n in range(7)],
+        f"workspace 7 output {pivot} {primary}",
+    ])
+    with run_compositor(scroll_compositor_binary, tmp_path, config) as compositor:
+        compositor.wait_for_idle()
+        workspaces = compositor.ipc.get_workspaces()
+        assert len(workspaces) == output_count
+        for ws in workspaces:
+            if ws["num"] in range(7) and primary.startswith("HEADLESS-"):
+                assert ws["output"] == primary
+            if ws["num"] == 7:
+                preferred = pivot if pivot.startswith("HEADLESS-") else primary
+                if preferred.startswith("HEADLESS-"):
+                    assert ws["output"] == preferred
+        # With neither preferred display present, numbered slots are open.
+        if primary == "missing-dell" and pivot == "missing-hp":
+            assert {ws["num"] for ws in workspaces} == {0, 1}
+
+
 def test_layout_follows_output_hotplug(scroll_compositor_binary, tmp_path):
     config = "\n".join([
         "xwayland disable",
@@ -19,7 +54,8 @@ def test_layout_follows_output_hotplug(scroll_compositor_binary, tmp_path):
         "workspace 0",
     ])
     # Own compositor, exact socket, real clients. Never uses CLI socket discovery.
-    for compositor in run_compositor(scroll_compositor_binary, tmp_path, config):
+    with run_compositor(scroll_compositor_binary, tmp_path, config) as compositor:
+        compositor.ipc.sock.settimeout(10)
         with ExitStack() as clients:
             views = []
             for n in range(8):
@@ -98,7 +134,8 @@ layout_follow_output {follow}
 output HEADLESS-2 layout_type vertical
 workspace 0
 """
-    for compositor in run_compositor(scroll_compositor_binary, tmp_path, config):
+    with run_compositor(scroll_compositor_binary, tmp_path, config) as compositor:
+        compositor.ipc.sock.settimeout(10)
         with wayland_client(compositor, "moving-window"):
             view = wait_for_client_map(compositor, "moving-window")
             compositor.cmd("create_output")

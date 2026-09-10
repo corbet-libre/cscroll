@@ -398,7 +398,8 @@ static bool workspace_valid_on_output(const char *output_name,
 		}
 	}
 
-	return false;
+	// No preferred output is available: this workspace is open on any output.
+	return true;
 }
 
 static void workspace_name_from_binding(const struct sway_binding * binding,
@@ -529,12 +530,15 @@ char *workspace_next_name(const char *output_name) {
 	if (target != NULL) {
 		return target;
 	}
-	// As a fall back, use the next available number
+	// As a fall back, use the next available number that is not reserved for
+	// another enabled output. Default workspaces must obey the same priorities
+	// as names selected from bindings and explicit assignments.
 	char name[12] = "";
 	unsigned int ws_num = 1;
 	do {
 		snprintf(name, sizeof(name), "%u", ws_num++);
-	} while (workspace_by_number(name));
+	} while (workspace_by_number(name) ||
+			!workspace_valid_on_output(output_name, name));
 	return strdup(name);
 }
 
