@@ -31,6 +31,9 @@ runtime or packages a helper that is tightly coupled to its runtime protocol.
   popup listeners before a parent layer can disappear.
 - Remapped views leave the fade-out list, preventing duplicate entries that
   would reference freed views after repeated unmap/remap cycles.
+- Opt-in `layout_follow_output` makes workspace moves follow the destination
+  layout for both existing tiled windows and future insertion, including
+  hotplug evacuation and restoration.
 
 The lifetime regressions use real Wayland clients and isolated headless Scroll
 instances. Run them on the build host with AddressSanitizer enabled:

@@ -139,6 +139,7 @@ static const struct cmd_handler config_handlers[] = {
 	{ "layout_default_height", cmd_layout_default_height },
 	{ "layout_default_mode", cmd_layout_default_mode },
 	{ "layout_default_width", cmd_layout_default_width },
+	{ "layout_follow_output", cmd_layout_follow_output },
 	{ "layout_heights", cmd_layout_heights },
 	{ "layout_widths", cmd_layout_widths },
 	{ "maximize_if_single", cmd_maximize_if_single },

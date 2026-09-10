@@ -285,6 +285,14 @@ The following commands may only be used in the configuration file.
 	Default is _1.0_. Sets the default height for new windows
 	("horizontal" layouts) or rows ("vertical" layouts).
 
+*layout_follow_output* yes|no
+	When enabled, moving a workspace to another output transposes its existing
+	tiled columns/rows to the destination's layout and sets its insertion mode
+	to the same axis. Applies to manual moves, unplug evacuation and hotplug
+	restoration, including hidden workspaces. Floating windows are unchanged.
+	The destination uses *output layout_type*, then *default_orientation*, then
+	its aspect ratio. Default is _no_.
+
 *layout_default_width* <number>
 	Default is _0.5_. Sets the default width for new columns
 	("horizontal" layout) or windows ("vertical" layouts).
