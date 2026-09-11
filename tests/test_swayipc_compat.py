@@ -167,10 +167,22 @@ class SocketSafetyTests(unittest.TestCase):
 
 
 class ProxyRoundTripTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # A failed fixture connection must never fall back to a real compositor.
+        compositor_variables = (
+            "SCROLL_REAL_SOCK", "SCROLLSOCK", "SWAYSOCK", "I3SOCK", "XDG_RUNTIME_DIR"
+        )
+        environment = mock.patch.dict(os.environ, dict.fromkeys(compositor_variables, ""))
+        environment.start()
+        self.addCleanup(environment.stop)
+
     async def test_only_upstream_responses_are_rewritten(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             upstream_path = str(Path(temp_dir) / "upstream.sock")
             proxy_path = str(Path(temp_dir) / "proxy.sock")
+            self.assertEqual(
+                compat.upstream_candidates(proxy_path, (upstream_path,)), [upstream_path]
+            )
             request_seen = asyncio.Future()
 
             async def upstream(reader, writer):
