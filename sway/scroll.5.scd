@@ -704,6 +704,15 @@ set|plus|minus|toggle <amount>
 	edges of the row if it is alone in a column, or the edges of the column
 	if it has siblings in that column.
 
+*move* left-or-to-workspace-prev|right-or-to-workspace-next|up-or-to-workspace-prev|down-or-to-workspace-next
+	Tries to move the focused container in the implied direction and, only
+	when it cannot move that way, carries it to the neighbouring workspace
+	on the same output (up/left to _prev_on_output_, down/right to
+	_next_on_output_) instead of doing nothing. Floating, fullscreen and
+	scratchpad containers behave exactly like the plain directional move.
+	This is the shared fall-through behaviour Ciri carries natively as
+	_move-window-{up,down}-or-to-workspace-{up,down}_.
+
 *move* [absolute] position <pos_x> [px|ppt] <pos_y> [px|ppt]
 	Moves the focused container to the specified position in the workspace.
 	The position can be specified in pixels or percentage points, omitting
