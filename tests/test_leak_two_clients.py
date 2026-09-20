@@ -1,6 +1,5 @@
 from pathlib import Path
 import subprocess
-import time
 from test_utils import (
     run_compositor,
     wait_for_client_map,
@@ -23,8 +22,10 @@ def test_leak_two_clients(scroll_compositor_binary: str, tmp_path: Path) -> None
                 with wayland_client(fresh_compositor, "client2"):
                     wait_for_client_map(fresh_compositor, "client2")
 
-                    # Let them run a bit
-                    time.sleep(0.5)
+                    # Readiness poll replaces the old fixed settle sleep:
+                    # proceed once the compositor reports no pending
+                    # transactions or animations.
+                    fresh_compositor.wait_for_idle()
 
                     # Terminate compositor while clients are still running
                     fresh_compositor.proc.terminate()

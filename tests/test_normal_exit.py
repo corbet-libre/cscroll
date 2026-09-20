@@ -38,7 +38,8 @@ bar {
     with run_compositor(scroll_compositor_binary, tmp_path, config_content) as inst:
         factory = ScrollCompositorFactory(inst)
         with factory() as fresh_compositor:
-            # Let it run a bit to ensure swaybar starts
+            # Fixed settle sleep kept: bar startup exposes no queryable
+            # readiness signal, so there is nothing to poll on here.
             time.sleep(0.5)
 
             # Send exit command

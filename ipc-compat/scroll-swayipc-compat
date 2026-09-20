@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT AND Apache-2.0
+"""Expose scroll IPC to clients that strictly deserialize Sway workspace data.
+
+Only the two lossless schema aliases are translated, and only in the
+compositor-to-client direction:
+
+    horizontal -> splith
+    vertical   -> splitv
+
+Optional favourites keep numbered workspace buttons usable for clients whose
+workspace model requires a currently resolvable container ID.
+"""
+
+import argparse
+import asyncio
+import glob
+import json
+import os
+import re
+import socket
+import stat
+import struct
+import sys
+
+
+MAGIC = b"i3-ipc"
+HEADER_SIZE = len(MAGIC) + 8
+DEFAULT_SOCKET_NAME = "scroll-swaycompat.sock"
+GET_WORKSPACES = 1
+EVENT_WORKSPACE = 0x80000000
+
+# Byte-pattern rewriting is deliberate. The scroll-only layout values occur
+# solely as "layout" fields in compositor payloads (including GET_TREE), so a
+# full JSON parse would only re-encode the same content while risking
+# whitespace/key-order churn in forwarded frames. The accepted over-match is a
+# client-visible string that literally embeds e.g. `"layout":"horizontal"`;
+# no such value occurs in the Sway schema outside the layout field. Frame
+# lengths are recomputed after rewriting.
+LAYOUT_ALIASES = (
+    (re.compile(rb'"layout"\s*:\s*"horizontal"'), b'"layout":"splith"'),
+    (re.compile(rb'"layout"\s*:\s*"vertical"'), b'"layout":"splitv"'),
+)
+
+
+def rewrite_layouts(payload: bytes) -> bytes:
+    """Translate scroll-only layout values into their Sway schema aliases."""
+    for pattern, replacement in LAYOUT_ALIASES:
+        payload = pattern.sub(replacement, payload)
+    return payload
+
+
+def rekey_workspace(workspace: dict) -> dict:
+    """Give numbered workspaces the stable ID strict clients derive by name."""
+    number = workspace.get("num")
+    # Scroll and the Sway IPC schema both use -1 for a named workspace and permit 0 as a real
+    # numbered workspace. Testing truthiness or requiring > 0 would leave workspace 0 with its
+    # transient container ID while every other configured favourite is keyed by number.
+    if isinstance(number, int) and number >= 0:
+        workspace["id"] = number
+    return workspace
+
+
+def synthesize_favourites(workspaces: list[dict], favourites: tuple[int, ...]) -> list[dict]:
+    """Add inactive entries for configured numbered workspaces not yet present."""
+    if not workspaces or not favourites:
+        return workspaces
+
+    present = {workspace.get("num") for workspace in workspaces}
+    template = next(
+        (workspace for workspace in workspaces if workspace.get("focused")),
+        workspaces[0],
+    )
+    result = list(workspaces)
+    for number in favourites:
+        if number in present:
+            continue
+        placeholder = json.loads(json.dumps(template))
+        placeholder.update(
+            {
+                "id": number,
+                "num": number,
+                "name": str(number),
+                "focused": False,
+                "visible": False,
+                "urgent": False,
+            }
+        )
+        for field in ("nodes", "floating_nodes"):
+            if field in placeholder:
+                placeholder[field] = []
+        if "representation" in placeholder:
+            placeholder["representation"] = None
+        result.append(placeholder)
+
+    # Lock the intended order: numbered workspaces (num >= 0, including 0)
+    # ascending first, named workspaces (num == -1) last. Strict Sway-schema
+    # clients expect stable numeric order; the named-last rule is pinned by
+    # test_named_workspaces_sort_after_numbered.
+    result.sort(key=lambda workspace: (workspace.get("num", 0) < 0, workspace.get("num", 0)))
+    return result
+
+
+def rewrite_response(
+    message_type: int,
+    payload: bytes,
+    favourites: tuple[int, ...] = (),
+) -> bytes | None:
+    """Translate Scroll schema seams and optionally preserve favourite workspaces."""
+    payload = rewrite_layouts(payload)
+    if not favourites:
+        return payload
+
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return payload
+
+    if message_type == GET_WORKSPACES and isinstance(data, list):
+        workspaces = [rekey_workspace(workspace) for workspace in data]
+        return json.dumps(synthesize_favourites(workspaces, favourites)).encode()
+
+    if message_type == EVENT_WORKSPACE and isinstance(data, dict):
+        current = data.get("current") or {}
+        if data.get("change") == "empty" and current.get("num") in favourites:
+            return None
+        for field in ("current", "old"):
+            if isinstance(data.get(field), dict):
+                data[field] = rekey_workspace(data[field])
+        return json.dumps(data).encode()
+
+    return payload
+
+
+async def read_frame(reader: asyncio.StreamReader) -> tuple[int, bytes]:
+    header = await reader.readexactly(HEADER_SIZE)
+    if not header.startswith(MAGIC):
+        raise ValueError("bad magic: not an i3 IPC stream")
+    length, message_type = struct.unpack("<II", header[len(MAGIC) :])
+    payload = await reader.readexactly(length) if length else b""
+    return message_type, payload
+
+
+def frame(message_type: int, payload: bytes) -> bytes:
+    """Frame a payload, recomputing its length after any schema translation."""
+    return MAGIC + struct.pack("<II", len(payload), message_type) + payload
+
+
+async def pump(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    rewrite: bool,
+    favourites: tuple[int, ...] = (),
+) -> None:
+    try:
+        while True:
+            message_type, payload = await read_frame(reader)
+            if rewrite:
+                payload = rewrite_response(message_type, payload, favourites)
+                if payload is None:
+                    continue
+            writer.write(frame(message_type, payload))
+            await writer.drain()
+    except (
+        asyncio.IncompleteReadError,
+        BrokenPipeError,
+        ConnectionResetError,
+        ValueError,
+    ):
+        pass
+    finally:
+        writer.close()
+
+
+def upstream_candidates(listen: str, explicit: tuple[str, ...] = ()) -> list[str]:
+    """Return upstream paths in priority order, excluding the proxy itself.
+
+    Candidates are resolved for every client connection. scroll's socket name
+    contains its PID, so caching a path would break after a compositor restart.
+    """
+    candidates: list[str] = []
+
+    def add(path: str | None) -> None:
+        if path and path != listen and path not in candidates:
+            candidates.append(path)
+
+    for path in explicit:
+        add(path)
+    for variable in ("SCROLL_REAL_SOCK", "SCROLLSOCK", "SWAYSOCK", "I3SOCK"):
+        add(os.environ.get(variable))
+
+    # An empty XDG_RUNTIME_DIR is treated exactly like an unset one: no
+    # discovery. This matches run(), which rejects both cases when no
+    # explicit listen socket is given.
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    discovered = (
+        glob.glob(os.path.join(runtime_dir, "scroll-ipc.*.sock"))
+        if runtime_dir
+        else []
+    )
+    for path in sorted(discovered, key=_mtime, reverse=True):
+        add(path)
+    return candidates
+
+
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+async def connect_upstream(
+    listen: str,
+    explicit: tuple[str, ...] = (),
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+    for path in upstream_candidates(listen, explicit):
+        try:
+            return await asyncio.open_unix_connection(path)
+        except OSError:
+            continue
+    return None
+
+
+async def handle(
+    client_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    listen: str,
+    explicit: tuple[str, ...] = (),
+    favourites: tuple[int, ...] = (),
+) -> None:
+    upstream = await connect_upstream(listen, explicit)
+    if upstream is None:
+        client_writer.close()
+        return
+    upstream_reader, upstream_writer = upstream
+    await asyncio.gather(
+        pump(client_reader, upstream_writer, rewrite=False),
+        pump(upstream_reader, client_writer, rewrite=True, favourites=favourites),
+    )
+
+
+def sd_notify(state: str) -> None:
+    """Send readiness when systemd supplied a notification socket.
+
+    Notify failures are swallowed deliberately: readiness is best-effort, and
+    a stale or unreachable NOTIFY_SOCKET must never fail proxy startup.
+    """
+    address = os.environ.get("NOTIFY_SOCKET")
+    if not address:
+        return
+    if address.startswith("@"):
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify_socket:
+            notify_socket.connect(address)
+            notify_socket.sendall(state.encode())
+    except OSError:
+        pass
+
+
+def remove_stale_socket(path: str) -> None:
+    """Remove a refused Unix socket, but never overwrite a live or regular file.
+
+    TOCTOU note: another process could bind the path between our
+    connect-probe and the caller's bind. That race is accepted because the
+    worst case is a startup bind error, never data loss: a live socket is
+    never unlinked, and a regular file always raises.
+    """
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(mode):
+        raise RuntimeError(f"refusing to replace non-socket path: {path}")
+
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.connect(path)
+    except ConnectionRefusedError:
+        os.unlink(path)
+    except OSError as error:
+        raise RuntimeError(f"cannot verify existing socket {path}: {error}") from error
+    else:
+        raise RuntimeError(f"socket already accepts connections: {path}")
+    finally:
+        probe.close()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="proxy scroll IPC for strict Sway-schema clients"
+    )
+    parser.add_argument(
+        "listen",
+        nargs="?",
+        help=f"proxy socket (default: $XDG_RUNTIME_DIR/{DEFAULT_SOCKET_NAME})",
+    )
+    parser.add_argument(
+        "--upstream",
+        action="append",
+        default=[],
+        metavar="SOCKET",
+        help="explicit scroll socket; may be repeated and is tried before the environment",
+    )
+    parser.add_argument(
+        "--favorite",
+        action="append",
+        default=[],
+        type=nonnegative_workspace_number,
+        metavar="WORKSPACE",
+        help="retain a numbered workspace for strict workspace clients; may be repeated",
+    )
+    args = parser.parse_args(argv)
+    # Deduplicate at parse time so favourite order is locked here; run()
+    # retains its own dict.fromkeys pass, which is now idempotent.
+    args.favorite = list(dict.fromkeys(args.favorite))
+    return args
+
+
+def nonnegative_workspace_number(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("workspace number must be non-negative")
+    return number
+
+
+async def run(args: argparse.Namespace) -> None:
+    listen = args.listen
+    if listen is None:
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if not runtime_dir:
+            raise RuntimeError("XDG_RUNTIME_DIR is required when no listen socket is given")
+        listen = os.path.join(runtime_dir, DEFAULT_SOCKET_NAME)
+
+    remove_stale_socket(listen)
+    explicit = tuple(args.upstream)
+    favourites = tuple(dict.fromkeys(args.favorite))
+    server = await asyncio.start_unix_server(
+        lambda reader, writer: handle(
+            reader, writer, listen, explicit, favourites
+        ),
+        path=listen,
+    )
+    print(
+        f"scroll-swayipc-compat: listening on {listen}; "
+        f"upstream candidates: {upstream_candidates(listen, explicit) or 'none yet'}",
+        flush=True,
+    )
+    sd_notify("READY=1")
+    async with server:
+        await server.serve_forever()
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        asyncio.run(run(parse_args(argv)))
+    except KeyboardInterrupt:
+        return 0
+    except (OSError, RuntimeError) as error:
+        print(f"scroll-swayipc-compat: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

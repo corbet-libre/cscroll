@@ -518,32 +518,6 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
  * Functions used by handle_pointer_motion  /
  *----------------------------------------*/
 
-static void container_viewport_geometry(struct sway_workspace *workspace,
-		struct sway_container *container, struct wlr_fbox *viewport) {
-	if (container->pending.fullscreen_layout != FULLSCREEN_DISABLED) {
-		if (workspace->split.split != WORKSPACE_SPLIT_NONE) {
-			viewport->x = workspace->split.output_area.x;
-			viewport->y = workspace->split.output_area.y;
-			viewport->width = workspace->split.output_area.width;
-			viewport->height = workspace->split.output_area.height;
-			return;
-		} else {
-			struct sway_output *output = workspace->output;
-			if (output) {
-				viewport->x = output->lx;
-				viewport->y = output->ly;
-				viewport->width = output->width;
-				viewport->height = output->height;
-				return;
-			}
-		}
-	}
-	viewport->x = workspace->x;
-	viewport->y = workspace->y;
-	viewport->width = workspace->width;
-	viewport->height = workspace->height;
-}
-
 static void check_focus_follows_mouse(struct sway_seat *seat,
 		struct seatop_default_event *e, struct sway_node *hovered_node) {
 	struct sway_node *focus = seat_get_focus(seat);
@@ -601,34 +575,34 @@ static void check_focus_follows_mouse(struct sway_seat *seat,
 		// If focus_follows_mouse is yes and the cursor got over the view due
 		// to, say, a workspace switch, we don't want to set the focus.
 		// But if focus_follows_mouse is "always", we do.
-		if (config->focus_follows_mouse != FOLLOWS_ALWAYS) {
-			if (hovered_node == e->previous_node) {
-				return;
-			}
-			struct sway_container *container = hovered_node->sway_container;
-			struct sway_workspace *ws = container->pending.workspace;
-			struct wlr_fbox geometry;
-			bool is_floating = container_is_floating(container);
-			container_current_geometry(container, &geometry);
-			if (!is_floating &&	(geometry.x >= ws->x + ws->width ||
-					geometry.x + geometry.width <= ws->x ||
-					geometry.y >= ws->y + ws->height ||
-					geometry.y + geometry.height <= ws->y)) {
-				return;
-			} else if (config->focus_follows_mouse == FOLLOWS_FULL && !is_floating &&
-					   !container_is_fullscreen_or_child(container)) {
-				struct wlr_fbox viewport;
-				container_viewport_geometry(ws, container, &viewport);
-				if (geometry.x < viewport.x ||
-						geometry.x + geometry.width > viewport.x + viewport.width ||
-						geometry.y < viewport.y ||
-						geometry.y + geometry.height  > viewport.y + viewport.height) {
-					return;
-				}
+		// For scroller, we also check if the cursor is in the gaps_out area,
+		// and if it is, we only change focus if clicked or FOLLOWS_ALWAYS.
+		struct sway_container *container = hovered_node->sway_container;
+		struct sway_workspace *ws = container->pending.workspace;
+		// Check if the hovered_node is fully wihin the viewport if FOLLOWS_FULL
+		bool valid_focus = true;
+		if (config->focus_follows_mouse == FOLLOWS_FULL && !container_is_floating(container)) {
+			float scale = layout_scale_enabled(ws) ? layout_scale_get(ws) : 1.0f;
+			if (container->pending.x < ws->x ||
+				container->pending.x + container->pending.width * scale > ws->x + ws->width ||
+				container->pending.y < ws->y ||
+				container->pending.y + container->pending.height * scale > ws->y + ws->height) {
+				valid_focus = false;
 			}
 		}
-		seat_set_focus(seat, hovered_node);
-		transaction_commit_dirty();
+		double cx = seat->cursor->cursor->x;
+		double cy = seat->cursor->cursor->y;
+		if (layout_overview_workspaces_enabled()) {
+			layout_overview_workspaces_local_to_global(ws, &cx, &cy);
+		}
+		bool in_gaps = cx < ws->x || cx > ws->x + ws->width || cy < ws->y || cy > ws->y + ws->height ?
+			true : false;
+		valid_focus = valid_focus && !in_gaps;
+		if ((hovered_node != e->previous_node && valid_focus) ||
+				config->focus_follows_mouse == FOLLOWS_ALWAYS) {
+			seat_set_focus(seat, hovered_node);
+			transaction_commit_dirty();
+		}
 	}
 }
 

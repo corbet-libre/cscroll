@@ -129,7 +129,6 @@ struct wlr_drm_backend {
 	struct wlr_drm_format_set mgpu_formats;
 
 	bool supports_tearing_page_flips;
-	bool has_cursor_plane_hotspot;
 };
 
 struct wlr_drm_mode {
@@ -162,8 +161,6 @@ struct wlr_drm_connector_state {
 	uint32_t gamma_lut;
 	uint32_t fb_damage_clips;
 	int primary_in_fence_fd;
-	uint32_t primary_color_encoding;
-	uint32_t primary_color_range;
 	bool vrr_enabled;
 	uint32_t colorspace;
 	uint32_t hdr_output_metadata;

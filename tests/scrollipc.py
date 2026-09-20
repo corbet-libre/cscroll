@@ -70,6 +70,13 @@ class ScrollIPC:
             raise ValueError(f"Unexpected reply type: {reply_type}")
         return json.loads(reply_payload)
 
+    def get_workspaces(self) -> list:
+        self._send(IPC_GET_WORKSPACES, "")
+        reply_type, reply_payload = self._recv()
+        if reply_type != IPC_GET_WORKSPACES:
+            raise ValueError(f"Unexpected reply type: {reply_type}")
+        return json.loads(reply_payload)
+
     def lua_eval(self, code: str) -> dict:
         self._send(IPC_LUA_EVAL, code)
         reply_type, reply_payload = self._recv()

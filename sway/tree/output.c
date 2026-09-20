@@ -301,7 +301,6 @@ void output_disable(struct sway_output *output) {
 
 	destroy_layers(output);
 	output_evacuate(output);
-	animation_output_gone(output->wlr_output);
 	sway_ext_workspace_output_disable(output);
 }
 
@@ -344,6 +343,19 @@ void output_add_workspace(struct sway_output *output,
 	}
 	list_add(output->workspaces, workspace);
 	workspace->output = output;
+	// Every output move (including evacuation and restoration) comes through
+	// here. The fallback output is only storage while no real output is enabled.
+	if (config->layout_follow_output && output != root->fallback_output) {
+		enum sway_container_layout type = output_get_default_layout(output);
+		layout_set_type(workspace, type);
+		workspace->layout.modifiers.mode = type;
+		for (int i = 0; i < workspace->tiling->length; ++i) {
+			struct sway_container *con = workspace->tiling->items[i];
+			con->pending.layout = type == L_HORIZ ? L_VERT : L_HORIZ;
+			container_update_representation(con);
+		}
+		workspace_update_representation(workspace);
+	}
 	if (workspace->output && workspace->output->ext_workspace_group) {
 		wlr_ext_workspace_handle_v1_set_group(workspace->ext_workspace,
 			workspace->output->ext_workspace_group);

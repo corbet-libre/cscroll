@@ -5,7 +5,6 @@
 #include <wlr/types/wlr_compositor.h>
 #include "list.h"
 #include <wlr/types/wlr_scene.h>
-#include "sway/desktop/animation.h"
 #include "sway/tree/node.h"
 
 struct sway_view;
@@ -101,8 +100,6 @@ struct sway_container_state {
 	double content_width, content_height;
 
 	float alpha;
-
-	char *formatted_title; // The title displayed in the title bar
 };
 
 struct sway_container {
@@ -142,6 +139,7 @@ struct sway_container {
 	struct sway_container_state pending;
 
 	char *title;           // The view's title (unformatted)
+	char *formatted_title; // The title displayed in the title bar
 	double title_width;
 
 	char *title_format;
@@ -175,8 +173,12 @@ struct sway_container {
 		double x, y, width, height;	// for floating containers
 	} toggle_size;
 
+	// Animation variables
 	struct {
-		struct sway_animated_variable x, y, w, h, a;
+		double x0, y0, w0, h0;
+		double xt, yt, wt, ht;
+		double w1, h1;
+		float a0, at, a1;
 	} animation;
 
 	bool selected;	// for selection/cut/move
@@ -250,8 +252,6 @@ bool container_has_ancestor(struct sway_container *container,
 void container_reap_empty(struct sway_container *con);
 
 void container_update_title_bar(struct sway_container *container);
-
-void container_update_title_text(struct sway_container *container);
 
 void container_update_marks(struct sway_container *container);
 
@@ -463,15 +463,5 @@ struct sway_container *container_get_by_id(size_t id);
  * and the whole output layout for floating containers.
  */
 bool container_in_viewport(struct sway_container *container);
-
-/*
- * If the container is fully in the viewport along axes, return true
- */
-bool container_axes_in_viewport(struct sway_container *container, uint32_t axes);
-
-/**
- * Returns the container's current geometry, correct even during an animation.
- */
-void container_current_geometry(struct sway_container *con, struct wlr_fbox *geometry);
 
 #endif

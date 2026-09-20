@@ -21,7 +21,7 @@ void wlr_primary_selection_source_destroy(
 		return;
 	}
 
-	wl_signal_emit_mutable(&source->events.destroy, NULL);
+	wl_signal_emit_mutable(&source->events.destroy, source);
 
 	assert(wl_list_empty(&source->events.destroy.listener_list));
 
@@ -75,7 +75,7 @@ static void seat_handle_primary_selection_source_destroy(
 		wl_container_of(listener, seat, primary_selection_source_destroy);
 	wl_list_remove(&seat->primary_selection_source_destroy.link);
 	seat->primary_selection_source = NULL;
-	wl_signal_emit_mutable(&seat->events.set_primary_selection, NULL);
+	wl_signal_emit_mutable(&seat->events.set_primary_selection, seat);
 }
 
 void wlr_seat_set_primary_selection(struct wlr_seat *seat,
@@ -101,5 +101,5 @@ void wlr_seat_set_primary_selection(struct wlr_seat *seat,
 			&seat->primary_selection_source_destroy);
 	}
 
-	wl_signal_emit_mutable(&seat->events.set_primary_selection, NULL);
+	wl_signal_emit_mutable(&seat->events.set_primary_selection, seat);
 }

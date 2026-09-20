@@ -27,6 +27,7 @@
 #include "list.h"
 #include "pango.h"
 #include "stringop.h"
+#include "util.h"
 
 static struct wlr_scene_decoration *alloc_decoration_node(struct wlr_scene_tree *parent,
 		struct sway_view *view, bool *failed) {
@@ -46,27 +47,6 @@ static struct wlr_scene_decoration *alloc_decoration_node(struct wlr_scene_tree 
 		*failed = true;
 	}
 	return decoration;
-}
-
-static void container_init_animation_variables(struct sway_container *con) {
-	animated_variable_init(&con->animation.x, con->current.x,
-		ANIMATED_VARIABLE_POSITION);
-	animated_variable_init(&con->animation.y, con->current.y,
-		ANIMATED_VARIABLE_POSITION);
-	animated_variable_init(&con->animation.w, con->current.width,
-		ANIMATED_VARIABLE_SIZE);
-	animated_variable_init(&con->animation.h, con->current.height,
-		ANIMATED_VARIABLE_SIZE);
-	animated_variable_init(&con->animation.a, con->current.alpha,
-		ANIMATED_VARIABLE_FADE);
-}
-
-static void container_release_animation_variables(struct sway_container *con) {
-	animated_variable_release(&con->animation.x);
-	animated_variable_release(&con->animation.y);
-	animated_variable_release(&con->animation.w);
-	animated_variable_release(&con->animation.h);
-	animated_variable_release(&con->animation.a);
 }
 
 struct sway_container *container_create(struct sway_view *view) {
@@ -132,7 +112,6 @@ struct sway_container *container_create(struct sway_view *view) {
 	c->pending.layout = L_NONE;
 	c->view = view;
 	c->current.alpha = c->pending.alpha = 1.0f;
-	container_init_animation_variables(c);
 	c->marks = create_list();
 	c->toggle_size.single = false;
 	c->toggle_size.state = TOGGLE_STATE_NONE;
@@ -474,36 +453,20 @@ void container_update_marks(struct sway_container *con) {
 	free(buffer);
 }
 
-void container_update_title_text(struct sway_container *con) {
-	if (!con->current.formatted_title || !*con->current.formatted_title) {
-		if (con->title_bar.title_text) {
-			wlr_scene_node_destroy(con->title_bar.title_text->node);
-			con->title_bar.title_text = NULL;
-		}
+void container_update_title_bar(struct sway_container *con) {
+	if (!con->formatted_title) {
 		return;
 	}
 
-	if (!con->title_bar.title_text) {
-		struct border_colors *colors = container_get_current_colors(con);
-		con->title_bar.title_text = sway_text_node_create(con->title_bar.tree,
-			con->current.formatted_title, colors->text, config->pango_markup);
-	} else {
-		sway_text_node_set_text(con->title_bar.title_text,
-			con->current.formatted_title);
-	}
-}
+	struct border_colors *colors = container_get_current_colors(con);
 
-void container_update_title_bar(struct sway_container *con) {
 	if (con->title_bar.title_text) {
 		wlr_scene_node_destroy(con->title_bar.title_text->node);
 		con->title_bar.title_text = NULL;
 	}
 
-	if (con->current.formatted_title && *con->current.formatted_title) {
-		struct border_colors *colors = container_get_current_colors(con);
-		con->title_bar.title_text = sway_text_node_create(con->title_bar.tree,
-			con->current.formatted_title, colors->text, config->pango_markup);
-	}
+	con->title_bar.title_text = sway_text_node_create(con->title_bar.tree,
+		con->formatted_title, colors->text, config->pango_markup);
 
 	// we always have to remake these text buffers completely for text font
 	// changes etc...
@@ -525,11 +488,9 @@ void container_destroy(struct sway_container *con) {
 				"which is still referenced by transactions")) {
 		return;
 	}
-	container_release_animation_variables(con);
 	node_map_remove(&con->node);
 	free(con->title);
-	free(con->pending.formatted_title);
-	free(con->current.formatted_title);
+	free(con->formatted_title);
 	free(con->title_format);
 	list_free(con->pending.children);
 	list_free(con->current.children);
@@ -809,7 +770,7 @@ size_t container_build_representation(enum sway_container_layout layout,
 				identifier = view_get_app_id(child->view);
 			}
 		} else {
-			identifier = child->pending.formatted_title;
+			identifier = child->formatted_title;
 		}
 		if (identifier) {
 			len += strlen(identifier);
@@ -827,17 +788,20 @@ size_t container_build_representation(enum sway_container_layout layout,
 void container_update_representation(struct sway_container *con) {
 	if (!con->view) {
 		size_t len = parse_title_format(con, NULL);
-		free(con->pending.formatted_title);
-		con->pending.formatted_title = NULL;
-		if (len) {
-			con->pending.formatted_title = calloc(len + 1, sizeof(char));
-			if (!sway_assert(con->pending.formatted_title,
-						"Unable to allocate title string")) {
-				return;
-			}
-			parse_title_format(con, con->pending.formatted_title);
+		free(con->formatted_title);
+		con->formatted_title = calloc(len + 1, sizeof(char));
+		if (!sway_assert(con->formatted_title,
+					"Unable to allocate title string")) {
+			return;
 		}
-		node_set_dirty(&con->node);
+		parse_title_format(con, con->formatted_title);
+
+		if (con->title_bar.title_text) {
+			sway_text_node_set_text(con->title_bar.title_text, con->formatted_title);
+			container_arrange_title_bar(con);
+		} else {
+			container_update_title_bar(con);
+		}
 	}
 	if (con->pending.parent) {
 		container_update_representation(con->pending.parent);
@@ -2390,27 +2354,7 @@ struct sway_container *container_get_by_id(size_t id) {
 		NULL;
 }
 
-static bool box_contains_box_axes(const struct wlr_box *bigger,
-		const struct wlr_box *smaller, uint32_t axes) {
-	if (wlr_box_empty(bigger) || wlr_box_empty(smaller)) {
-		return false;
-	}
-	if (axes & ALIGN_AXIS_H) {
-		if (smaller->x < bigger->x ||
-				smaller->x + smaller->width > bigger->x + bigger->width) {
-			return false;
-		}
-	}
-	if (axes & ALIGN_AXIS_V) {
-		if (smaller->y < bigger->y ||
-				smaller->y + smaller->height > bigger->y + bigger->height) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool container_axes_in_viewport(struct sway_container *container, uint32_t axes) {
+bool container_in_viewport(struct sway_container *container) {
 	struct sway_workspace *workspace = container->pending.workspace;
 	if (!workspace) {
 		return false;
@@ -2426,39 +2370,5 @@ bool container_axes_in_viewport(struct sway_container *container, uint32_t axes)
 	} else {
 		output_get_box(workspace->output, &box_o);
 	}
-	return box_contains_box_axes(&box_o, &box_c, axes);
-}
-
-
-bool container_in_viewport(struct sway_container *container) {
-	return container_axes_in_viewport(container, ALIGN_AXIS_H | ALIGN_AXIS_V);
-}
-
-void container_current_geometry(struct sway_container *con, struct wlr_fbox *geometry) {
-	struct sway_workspace *ws = con->pending.workspace ?
-		con->pending.workspace : con->current.workspace;
-	geometry->x = con->animation.x.animating ? con->animation.x.xt : con->pending.x;
-	geometry->y = con->animation.y.animating ? con->animation.y.xt : con->pending.y;
-	geometry->width = con->animation.w.animating ?
-		con->animation.w.xt : con->pending.width;
-	geometry->height = con->animation.h.animating ?
-		con->animation.h.xt : con->pending.height;
-	// Add the y offset if in the middle of a workspace switch
-	if (ws && !container_is_sticky_or_child(con)) {
-		geometry->y += workspace_switch_offset(ws);
-	}
-	if(layout_scale_enabled(ws)) {
-		double scale = (ws && ws->animation.s.animating) ?
-			ws->animation.s.xt : layout_scale_get(ws);
-		geometry->width *= scale;
-		geometry->height *= scale;
-		if (con->view && !con->pending.parent) {
-			// Floating window are special in scaled workspaces, because
-			// the virtual viewport is centered for them
-			const double minx = ws->output->lx + 0.5 * (1.0 - scale) * ws->output->width;
-			geometry->x = minx + scale * (geometry->x - ws->output->lx);
-			const double miny = ws->output->ly + 0.5 * (1.0 - scale) * ws->output->height;
-			geometry->y = miny + scale * (geometry->y - ws->output->ly);
-		}
-	}
+	return wlr_box_contains_box(&box_o, &box_c);
 }

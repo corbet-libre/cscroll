@@ -24,6 +24,8 @@
 
 static const char expected_syntax[] =
 	"Expected 'move <left|right|up|down> <[px] px>' or "
+	"'move left-or-to-workspace-prev|right-or-to-workspace-next|"
+	"up-or-to-workspace-prev|down-or-to-workspace-next' or "
 	"'move [--no-auto-back-and-forth] <container|window> [to] workspace <name>' or "
 	"'move <container|window|workspace> [to] output <name|direction>' or "
 	"'move <container|window> [to] mark <mark>'";
@@ -445,6 +447,40 @@ static struct cmd_results *cmd_move_workspace(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+// Post-move sequence shared by cmd_move_in_direction and
+// cmd_move_or_to_workspace: reap emptied parents, arrange, notify.
+static void finish_directional_move(struct sway_container *container,
+		struct sway_workspace *old_ws, struct sway_container *old_parent) {
+	// clean-up, destroying parents if the container was the last child
+	if (old_parent) {
+		container_reap_empty(old_parent);
+	} else if (old_ws) {
+		workspace_consider_destroy(old_ws);
+	}
+
+	struct sway_workspace *new_ws = container->pending.workspace;
+
+	if (root->fullscreen_global) {
+		arrange_root();
+	} else {
+		arrange_workspace(old_ws);
+		if (new_ws != old_ws) {
+			arrange_workspace(new_ws);
+		}
+	}
+
+	if (container->view) {
+		ipc_event_window(container, "move");
+	}
+
+	container_end_mouse_operation(container);
+
+	struct sway_seat *seat = config->handler_context.seat;
+	seat_consider_warp_to_focus(seat);
+
+	animation_set_type(ANIMATION_WINDOW_MOVE);
+}
+
 static struct cmd_results *cmd_move_in_direction(
 		enum sway_layout_direction direction, int argc, char **argv) {
 	int move_amt = 10;
@@ -506,36 +542,45 @@ static struct cmd_results *cmd_move_in_direction(
 		return cmd_results_new(CMD_SUCCESS, NULL);
 	}
 
-	// clean-up, destroying parents if the container was the last child
-	if (old_parent) {
-		container_reap_empty(old_parent);
-	} else if (old_ws) {
-		workspace_consider_destroy(old_ws);
-	}
-
-	struct sway_workspace *new_ws = container->pending.workspace;
-
-	if (root->fullscreen_global) {
-		arrange_root();
-	} else {
-		arrange_workspace(old_ws);
-		if (new_ws != old_ws) {
-			arrange_workspace(new_ws);
-		}
-	}
-
-	if (container->view) {
-		ipc_event_window(container, "move");
-	}
-
-	container_end_mouse_operation(container);
-
-	struct sway_seat *seat = config->handler_context.seat;
-	seat_consider_warp_to_focus(seat);
-
-	animation_set_type(ANIMATION_WINDOW_MOVE);
+	finish_directional_move(container, old_ws, old_parent);
 
 	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+// Shared fall-through move, the cscroll half of the behaviour Ciri carries
+// natively as move-window-{up,down}-or-to-workspace-{up,down}: try the
+// directional move first and, only when the container cannot move that way,
+// carry it to the neighbouring workspace on the same output instead of doing
+// nothing. Anything that is not a plain tiling container (floating,
+// fullscreen, scratchpad) keeps exactly the plain directional behaviour.
+static struct cmd_results *cmd_move_or_to_workspace(
+		enum sway_layout_direction direction, const char *fallback_workspace,
+		int argc, char **argv) {
+	if (argc) {
+		return cmd_results_new(CMD_INVALID, "%s", expected_syntax);
+	}
+
+	struct sway_container *container = config->handler_context.container;
+	if (!container) {
+		return cmd_results_new(CMD_FAILURE,
+				"Cannot move workspaces in a direction");
+	}
+
+	if (container_is_floating(container) || container->scratchpad ||
+			container->pending.fullscreen_mode != FULLSCREEN_NONE) {
+		return cmd_move_in_direction(direction, 0, NULL);
+	}
+
+	struct sway_workspace *old_ws = container->pending.workspace;
+	struct sway_container *old_parent = container->pending.parent;
+
+	if (container_move_in_direction(container, direction, false)) {
+		finish_directional_move(container, old_ws, old_parent);
+		return cmd_results_new(CMD_SUCCESS, NULL);
+	}
+
+	char *hop_argv[] = { "workspace", (char *)fallback_workspace };
+	return cmd_move_container(false, 2, hop_argv);
 }
 
 static struct cmd_results *cmd_move_to_position_pointer(
@@ -753,6 +798,8 @@ static struct cmd_results *cmd_move_to_scratchpad(void) {
 
 static const char expected_full_syntax[] = "Expected "
 	"'move left|right|up|down|beginning|end [<amount> [px]|nomode]'"
+	" or 'move left-or-to-workspace-prev|right-or-to-workspace-next|"
+	"up-or-to-workspace-prev|down-or-to-workspace-next'"
 	" or 'move [--no-auto-back-and-forth] [window|container] [to] workspace"
 	"  <name>|next|prev|next_on_output|prev_on_output|current|(number <num>)'"
 	" or 'move [window|container] [to] output <name/id>|left|right|up|down'"
@@ -785,6 +832,18 @@ struct cmd_results *cmd_move(int argc, char **argv) {
 		return cmd_move_in_direction(DIR_BEGIN, --argc, ++argv);
 	} else if (strcasecmp(argv[0], "end") == 0) {
 		return cmd_move_in_direction(DIR_END, --argc, ++argv);
+	} else if (strcasecmp(argv[0], "left-or-to-workspace-prev") == 0) {
+		return cmd_move_or_to_workspace(DIR_LEFT, "prev_on_output",
+				--argc, ++argv);
+	} else if (strcasecmp(argv[0], "right-or-to-workspace-next") == 0) {
+		return cmd_move_or_to_workspace(DIR_RIGHT, "next_on_output",
+				--argc, ++argv);
+	} else if (strcasecmp(argv[0], "up-or-to-workspace-prev") == 0) {
+		return cmd_move_or_to_workspace(DIR_UP, "prev_on_output",
+				--argc, ++argv);
+	} else if (strcasecmp(argv[0], "down-or-to-workspace-next") == 0) {
+		return cmd_move_or_to_workspace(DIR_DOWN, "next_on_output",
+				--argc, ++argv);
 	} else if (strcasecmp(argv[0], "workspace") == 0 && argc >= 2
 			&& (strcasecmp(argv[1], "to") == 0 ||
 				strcasecmp(argv[1], "output") == 0)) {

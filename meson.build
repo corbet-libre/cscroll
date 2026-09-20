@@ -1,8 +1,10 @@
+# License boundary: the compositor sources remain MIT-derived; independently
+# authored downstream files are dual MIT AND Apache-2.0. See LICENSING.md.
 project(
 	'scroll',
 	'c',
 	version: '1.13-dev',
-	license: 'MIT',
+	license: ['MIT', 'Apache-2.0'],
 	meson_version: '>=1.3',
 	default_options: [
 		'c_std=c11',
@@ -120,6 +122,7 @@ if scdoc.found()
 	scdoc_prog = find_program(scdoc.get_variable(pkgconfig: 'scdoc'), native: true)
 	mandir = get_option('mandir')
 	man_files = [
+		'ipc-compat/scroll-swayipc-compat.1.scd',
 		'sway/scroll.1.scd',
 		'sway/scroll.5.scd',
 		'sway/scroll-bar.5.scd',
@@ -225,6 +228,11 @@ install_data(
 )
 
 install_data(
+	'resources/scroll-portals.conf',
+	install_dir: join_paths(datadir, 'xdg-desktop-portal')
+)
+
+install_data(
 	'scroll.png',
 	install_dir: join_paths(datadir, 'icons')
 )
@@ -246,6 +254,7 @@ if get_option('default-wallpaper')
 endif
 
 subdir('completions')
+subdir('ipc-compat')
 subdir('tests')
 
 summary({

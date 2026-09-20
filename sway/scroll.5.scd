@@ -62,8 +62,8 @@ The following commands may only be used in the configuration file.
 
 *align_reset_auto* <true|false>
 	The default value is _true_. If _true_, alignment is reset when changing
-	focus to a new window breaks the current alignment. If _false_, alignment
-	can only be reset through *align reset*.
+	focus to a window outside of the viewport. If _false_, alignment can only
+	be reset through *align reset*.
 
 *animations* <animations-subcommands...>
 	Subcommands are:
@@ -125,13 +125,16 @@ The following commands may only be used in the configuration file.
 
 	*fade_in* enabled [duration] [var animation curve] [off animation curve]
 	Default is not defined, so it uses _default_ unless you set one up in your
-	config. It is the curve used to animate an increase in opacity, also including
-	that of a new window while the *window_open* animation is happening.
+	config. It is the curve used to animate the opacity of a new window while
+	the *window_open* animation is happening, and only if it is enabled.
+	_duration_ will be ignored and assumed the same as the *window_open*
+	animation's.
 
 	*fade_out* enabled [duration] [var animation curve] [off animation curve]
 	Default is not defined, so it uses _default_ unless you set one up in your
-	config. It is the curve used to animate a decrease in opacity, also used
-	when a window is closing.
+	config. It is the curve used to animate the opacity of a closing window.
+	_duration_ will be ignored and assumed the same as the *default*
+	animation's.
 
 	Format of an animation curve:
 
@@ -282,6 +285,14 @@ The following commands may only be used in the configuration file.
 	Default is _1.0_. Sets the default height for new windows
 	("horizontal" layouts) or rows ("vertical" layouts).
 
+*layout_follow_output* yes|no
+	When enabled, moving a workspace to another output transposes its existing
+	tiled columns/rows to the destination's layout and sets its insertion mode
+	to the same axis. Applies to manual moves, unplug evacuation and hotplug
+	restoration, including hidden workspaces. Floating windows are unchanged.
+	The destination uses *output layout_type*, then *default_orientation*, then
+	its aspect ratio. Default is _no_.
+
 *layout_default_width* <number>
 	Default is _0.5_. Sets the default width for new columns
 	("horizontal" layout) or windows ("vertical" layouts).
@@ -418,7 +429,7 @@ They are expected to be used with *bindsym* or at runtime through *scrollmsg*(1)
 	go back to automatic mode, you need to call _align_ reset.
 
 	See *align_reset_auto* for a configuration command to also reset alignment
-	when changing focus to a new window would break the current alignment.
+	when changing focus to a window outside of the viewport.
 
 	You can also center a window on your workspace using _middle_, it will
 	center its column, and also the window within the column.
@@ -692,6 +703,15 @@ set|plus|minus|toggle <amount>
 	its current column. You can still use beginning/end to move it to the
 	edges of the row if it is alone in a column, or the edges of the column
 	if it has siblings in that column.
+
+*move* left-or-to-workspace-prev|right-or-to-workspace-next|up-or-to-workspace-prev|down-or-to-workspace-next
+	Tries to move the focused container in the implied direction and, only
+	when it cannot move that way, carries it to the neighbouring workspace
+	on the same output (up/left to _prev_on_output_, down/right to
+	_next_on_output_) instead of doing nothing. Floating, fullscreen and
+	scratchpad containers behave exactly like the plain directional move.
+	This is the shared fall-through behaviour Ciri carries natively as
+	_move-window-{up,down}-or-to-workspace-{up,down}_.
 
 *move* [absolute] position <pos_x> [px|ppt] <pos_y> [px|ppt]
 	Moves the focused container to the specified position in the workspace.
@@ -2320,19 +2340,14 @@ local process_data = scroll.exec_process("kitty")
 	The keys of that table are "x", "y", "width" and "height", and the values
 	are floating point numbers.
 
-*container_get_animated_geometry(container)*
-	Returns a table with the _container_'s animated geometry (in layout
-	coordinates), or *nil* if the container is invalid.
-	This reflects the current animated position and size if an animation is
-	running. The keys of that table are "x", "y", "width" and "height", and the
-	values are floating point numbers.
 
-*container_get_animated_values(container)*
-	Returns a table with the _container_'s animated variable values, or *nil*
-	if the container is invalid.
-	This reflects the current animated position and size if an animation is
-	running. The keys of that table are "x", "y", "width", "height" (floating
-	point values), and "animating" if the variable is currently animating.
+*container_get_animated_geometry(container)*
+	Returns a table with the _container_'s animated geometry (in layout coordinates),
+	or *nil* if the container is invalid.
+	This reflects the current animated position and size if an animation is running.
+	The keys of that table are "x", "y", "width" and "height", and the values
+	are floating point numbers.
+
 
 *container_get_fullscreen_mode(container)*
 	Returns a string with the _fullscreen_ state for _container_. Values can be

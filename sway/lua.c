@@ -955,11 +955,7 @@ static int scroll_container_get_opacity(lua_State *L) {
 		lua_pushnil(L);
 		return 1;
 	}
-	double alpha = container->pending.alpha;
-	if (container->animation.a.animating) {
-		alpha = container->animation.a.xt;
-	}
-	lua_pushnumber(L, alpha);
+	lua_pushnumber(L, container->pending.alpha);
 	return 1;
 }
 
@@ -1102,9 +1098,9 @@ static int scroll_container_get_animated_geometry(lua_State *L) {
 	}
 
 	if (animation_animating()) {
-		lua_pushnumber(L, container->animation.w.xt);
+		lua_pushnumber(L, container->animation.wt);
 		lua_setfield(L, -2, "width");
-		lua_pushnumber(L, container->animation.h.xt);
+		lua_pushnumber(L, container->animation.ht);
 		lua_setfield(L, -2, "height");
 	} else {
 		lua_pushnumber(L, container->current.width);
@@ -1115,32 +1111,6 @@ static int scroll_container_get_animated_geometry(lua_State *L) {
 	return 1;
 }
 
-static int scroll_container_get_animated_values(lua_State *L) {
-	int argc = lua_gettop(L);
-	if (argc == 0) {
-		lua_pushnil(L);
-		return 1;
-	}
-	struct sway_container *container = lua_to_container(L, -1);
-	if (!container) {
-		lua_pushnil(L);
-		return 1;
-	}
-	lua_createtable(L, 0, 4);
-	lua_pushnumber(L, container->animation.x.xt);
-	lua_setfield(L, -2, "x");
-	lua_pushnumber(L, container->animation.y.xt);
-	lua_setfield(L, -2, "y");
-	lua_pushnumber(L, container->animation.w.xt);
-	lua_setfield(L, -2, "width");
-	lua_pushnumber(L, container->animation.h.xt);
-	lua_setfield(L, -2, "height");
-	lua_pushboolean(L, container->animation.x.animating ||
-		container->animation.y.animating || container->animation.w.animating ||
-		container->animation.h.animating);
-	lua_setfield(L, -2, "animating");
-	return 1;
-}
 
 static int scroll_container_get_fullscreen_mode(lua_State *L) {
 	int argc = lua_gettop(L);
@@ -2026,7 +1996,6 @@ static luaL_Reg const scroll_lib[] = {
 	{ "container_get_height", scroll_container_get_height },
 	{ "container_get_geometry", scroll_container_get_geometry },
 	{ "container_get_animated_geometry", scroll_container_get_animated_geometry },
-	{ "container_get_animated_values", scroll_container_get_animated_values },
 	{ "container_get_fullscreen_mode", scroll_container_get_fullscreen_mode },
 	{ "container_get_fullscreen_app_mode", scroll_container_get_fullscreen_app_mode },
 	{ "container_get_fullscreen_view_mode", scroll_container_get_fullscreen_view_mode },

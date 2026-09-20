@@ -227,6 +227,11 @@ def run_compositor(
 
     tests_dir = Path(__file__).parent.resolve()
     supp_path = tests_dir / "lsan.supp"
+    # Leak detection stays off for the same reason documented in
+    # check_lifetime.py: vendor EGL/DRM init-time leaks (scoped entry for
+    # egl_init_display in lsan.supp) plus unisolated remaining reports.
+    # The suppression file is still passed so the known entry stays scoped
+    # if detection is ever re-enabled.
     if "LSAN_OPTIONS" in env:
         env["LSAN_OPTIONS"] = (
             f"detect_leaks=0:suppressions={supp_path}:{env['LSAN_OPTIONS']}"

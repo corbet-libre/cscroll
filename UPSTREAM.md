@@ -1,0 +1,64 @@
+<!-- SPDX-License-Identifier: MIT AND Apache-2.0 -->
+
+# Upstream relationship
+
+`cscroll` preserves scroll's history and follows its `master` branch. The
+configured `upstream` remote is:
+
+```text
+git@github.com:dawsers/scroll.git
+```
+
+The downstream started at scroll `1.12.21`, commit `f80c5820`. It was last
+synchronized to upstream commit `0087fcfd` (2026-08-31). The local downstream
+branch is `main`; upstream keeps the name `master`.
+
+## Downstream ledger
+
+Keep this list short. A change belongs here only when it changes the compositor
+runtime or packages a helper that is tightly coupled to its runtime protocol.
+
+- `scroll-swayipc-compat`: temporary IPC proxy for strict Sway-schema clients.
+  It changes only scroll's `horizontal` and `vertical` layout variants into the
+  equivalent Sway schema names and recomputes IPC frame lengths. It can be
+  deleted when every relevant client uses scroll's native schema.
+- `runtime-components.toml`: canonical, platform-mapped manifest for the
+  companions whose lifecycle is coupled to `scroll`.
+- `scroll-portals.conf`: installed portal selection for the capture protocols
+  implemented by the wlroots backend.
+- Layer surfaces and popups retain their allocations until outstanding
+  transactions and animations release them. Scene destruction also detaches
+  popup listeners before a parent layer can disappear.
+- Remapped views leave the fade-out list, preventing duplicate entries that
+  would reference freed views after repeated unmap/remap cycles.
+- Opt-in `layout_follow_output` makes workspace moves follow the destination
+  layout for both existing tiled windows and future insertion, including
+  hotplug evacuation and restoration.
+- Automatically allocated workspace numbers respect output priorities too;
+  absent preferred outputs leave those numbers available elsewhere.
+
+The lifetime regressions use real Wayland clients and isolated headless Scroll
+instances. Run them on the build host with AddressSanitizer enabled:
+
+```sh
+python3 tests/check_lifetime.py --scroll build/sway/scroll --client build/tests/lifetime-client
+```
+
+Nix modules, host values, desktop policy, bar or launcher code, and synthetic
+workspace/favourites behaviour do not belong in this repository.
+
+## Sync procedure
+
+```sh
+git fetch upstream --tags
+git switch main
+git merge --no-ff upstream/master
+python3 -m unittest discover -s tests -p 'test_swayipc_compat.py' -v
+# Build-host-only lifetime gate (needs a real headless build; never on the seated Elitebook):
+python3 tests/check_lifetime.py --scroll build/sway/scroll --client build/tests/lifetime-client
+```
+
+Resolve conflicts in favour of the smallest downstream delta. Re-evaluate each
+ledger entry after every merge and delete it once upstream or native clients
+make it unnecessary. Full compositor builds and integration tests run on the
+build host, never on the seated Elitebook.

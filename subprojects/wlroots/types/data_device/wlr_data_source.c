@@ -39,7 +39,7 @@ void wlr_data_source_destroy(struct wlr_data_source *source) {
 		return;
 	}
 
-	wl_signal_emit_mutable(&source->events.destroy, NULL);
+	wl_signal_emit_mutable(&source->events.destroy, source);
 
 	assert(wl_list_empty(&source->events.destroy.listener_list));
 

@@ -14,12 +14,6 @@
 #include <wlr/util/transform.h>
 #include "types/wlr_scene.h"
 
-#include <wlr/config.h>
-
-#if WLR_HAS_XWAYLAND
-#include <wlr/xwayland/xwayland.h>
-#endif
-
 extern struct wlr_scene_callbacks scene_cbs;
 
 static double get_surface_preferred_buffer_scale(struct wlr_surface *surface) {
@@ -384,13 +378,11 @@ static void surface_reconfigure(struct wlr_scene_surface *scene_surface) {
 		// If we've cached the buffer's single-pixel buffer color
 		// then any in-place updates to the texture wouldn't be
 		// reflected in rendering. So only allow in-place texture
-		// updates if it's not a single pixel buffer.
+		// updates if it's not a single pixel buffer.  Note that we
+		// can't use the cached scene_buffer->is_single_pixel_buffer
+		// because that's only set later on.
 		bool is_single_pixel_buffer = false;
-		if (&surface->buffer->base == scene_buffer->buffer) {
-			// surface->buffer->source may already be NULL if the client destroyed
-			// the source buffer. Use cached state from the last buffer set.
-			is_single_pixel_buffer = scene_buffer->is_single_pixel_buffer;
-		} else if (surface->buffer->source != NULL) {
+		if (surface->buffer->source != NULL) {
 			struct wlr_single_pixel_buffer_v1 *spb =
 				wlr_single_pixel_buffer_v1_try_from_buffer(surface->buffer->source);
 			is_single_pixel_buffer = spb != NULL;
@@ -451,17 +443,7 @@ static bool scene_buffer_point_accepts_input(struct wlr_scene_buffer *scene_buff
 	*sx += scene_surface->clip.x;
 	*sy += scene_surface->clip.y;
 
-	struct wlr_surface *surface = scene_surface->surface;
-#if WLR_HAS_XWAYLAND
-	struct wlr_xwayland_surface *xsurface =
-		wlr_xwayland_surface_try_from_wlr_surface(surface);
-	if (xsurface != NULL) {
-		return wlr_xwayland_surface_point_accepts_input(
-			xsurface, *sx, *sy);
-	}
-#endif
-
-	return wlr_surface_point_accepts_input(surface, *sx, *sy);
+	return wlr_surface_point_accepts_input(scene_surface->surface, *sx, *sy);
 }
 
 static void surface_addon_destroy(struct wlr_addon *addon) {

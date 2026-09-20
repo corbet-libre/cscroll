@@ -13,7 +13,8 @@ def test_workspace_switch_empty_uaf(
     )
     with scroll_compositor_factory(config) as scroll_compositor:
         scroll_compositor.cmd("workspace 2; workspace 3; workspace 1")
-        # Sleep a bit to let the animation start and run a few frames, triggering UAF
+        # Fixed sleep kept: triggering the UAF needs wall-clock animation
+        # frames, not a readiness state, so polling cannot replace it.
         time.sleep(0.5)
 
         # Check if the compositor process crashed

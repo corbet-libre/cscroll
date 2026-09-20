@@ -14,8 +14,12 @@ def test_rapid_switch(scroll_compositor_factory: ScrollCompositorFactory) -> Non
         is_animating: bool = scroll_compositor.execute_lua("return scroll.animating()")
         assert is_animating is True, "Expected animation to be running"
 
-        # Wait for animation to finish (duration is 1s, wait 1.5s to be safe)
-        time.sleep(1.5)
+        # Poll for animation completion instead of a fixed sleep: the
+        # compositor reports its animating state, so wait on that directly.
+        deadline = time.monotonic() + 10
+        while scroll_compositor.execute_lua("return scroll.animating()"):
+            assert time.monotonic() < deadline, "animation did not finish"
+            time.sleep(0.05)
 
         # Check that it finished
         is_animating = scroll_compositor.execute_lua("return scroll.animating()")

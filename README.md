@@ -1,4 +1,46 @@
-# scroll
+# cscroll
+
+`cscroll` is a deliberately close downstream of
+[scroll](https://github.com/dawsers/scroll). It ships the upstream `scroll` and
+`scrollmsg` runtime together with only the small runtime repairs that cannot yet
+be consumed upstream. It also owns the canonical manifest for the runtime
+companions that become invalid or incomplete when `scroll` is removed. Nix
+integration and machine-specific configuration live outside this repository.
+
+The only current downstream runtime helper is `scroll-swayipc-compat`. It
+proxies scroll's IPC socket for strict Sway-schema clients and translates the
+lossless layout-name pairs `horizontal` to `splith` and `vertical` to `splitv`.
+It does not invent workspaces, rewrite workspace IDs, or implement favourites;
+that is client policy rather than protocol compatibility.
+
+## Runtime bundle
+
+[`runtime-components.toml`](runtime-components.toml) is the portable source of
+truth for the complete `cscroll` runtime bundle. Distribution integrations must
+install its required components together with the compositor:
+
+- `swaybg`, because `scroll` invokes it directly for configured backgrounds;
+- `wlr-randr`, for the output-management protocol implemented by `scroll`;
+- `xdg-desktop-portal-wlr` and the installed `scroll-portals.conf`, for capture;
+- `xorg-xwayland`, for the Xwayland server embedded by `scroll`; and
+- the bundled `scroll-swayipc-compat` bridge until native clients replace it.
+
+The generic portal core and GTK fallback, idle daemon, locker, notification
+daemon, OSD, screenshot clients, bar, and launcher are deliberately outside the
+bundle. They retain their meaning when the compositor changes.
+
+See [UPSTREAM.md](UPSTREAM.md) for the downstream ledger and sync procedure.
+
+## License
+
+`cscroll` is not relicensed wholesale. Code inherited from `scroll`, `sway`,
+and the bundled wlroots source retains its MIT license, notices, history, and
+authorship. Independently authored downstream files use dual MIT AND Apache-2.0. See
+[LICENSING.md](LICENSING.md) for the file boundary and contribution rule,
+[LICENSE](LICENSE) for MIT, and [LICENSE-APACHE](LICENSE-APACHE) for Apache-2.0.
+Contributions are accepted under the [Contributor License Agreement](CLA.md).
+
+## Upstream scroll documentation
 
 <img width="256" height="256" src="https://github.com/dawsers/scroll/blob/master/scroll.png" />
 
@@ -278,7 +320,7 @@ file, so you will need to set them before launching *scroll*, for example in
 your `~/.bash_profile` or the one your shell uses.
 
 ``` sh
-# Sway/Scroll needs its environment variables here
+# Sway/scroll needs its environment variables here
 # Set GTK theme
 export GTK_THEME=Adwaita-dark
 # Tell QT, GDK and others to use the Wayland backend by default, X11 if not available
@@ -894,8 +936,8 @@ can always align any column to the *center*, *left* or *right* of the monitor
 *vertical* mode. For example center a column for easier reading, regardless of
 what happens to the other columns. If you want to go back to automatic mode,
 you need to call `align reset`. However, there is also a configuration option,
-`align_reset_auto yes|no`. It is `yes` by default, which means every time
-changing focus to a window would breaks the alignment, the alignment will
+`align_reset_auto yes|no`. It is `yes` by default, which means every time you
+change focus to a window outside of the viewport, the alignment will
 be reset automatically.
 
 You can also center a window on your workspace using *middle*, it
@@ -1529,7 +1571,7 @@ lua $lua_scripts/workspace_exec.lua 1 exec kitty
 ```
 
 
-## Options Specific to Scroll
+## Options Specific to scroll
 
 Aside from i3/sway options, *scroll* supports a few additional ones to manage
 its layout/resizing/jump etc.
@@ -1614,10 +1656,10 @@ and equal to the gap between workspaces.
 
 ### General Options
 
-`align_reset_auto`: default is `yes` (`true`). If `true`, alignment through
-the `align` command is reset when changing focus to a new window breaks the
-current alignment. If `false`, you need to call `align reset` to undo the
-alignment.
+`align_reset_auto`: default is `yes` (`true`). If `true`, every time you
+change focus to a window outside of the viewport, any active alignment
+(`align` command) will be reset automatically, without any need to call
+`align reset`.
 
 `cursor_shake_magnify <true|false>`: Default value is `false`. If `true`,
 shaking the cursor will magnify it. It can be useful to find the location of
@@ -1789,11 +1831,9 @@ workspaces`).
 
 `layer_shell`: curve to animate layer shell surfaces and popups.
 
-`fade_in`: curve to animate an increase in opacity, for example, when opening
-a window.
+`fade_in`: curve to animate the opacity of an opening window.
 
-`fade_out`: curve to animate a decrease in opacity, for example, when closing
-a window.
+`fade_out`: curve to animate the opacity of a closing window.
 
 Format of an animation curve:
 

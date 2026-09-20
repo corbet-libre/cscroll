@@ -6,6 +6,18 @@
 #include "util.h"
 #include "sway/commands.h"
 
+struct cmd_results *cmd_layout_follow_output(int argc, char **argv) {
+	struct cmd_results *error = checkarg(argc, "layout_follow_output", EXPECTED_EQUAL_TO, 1);
+	if (error) {
+		return error;
+	}
+	if (strcmp(argv[0], "yes") != 0 && strcmp(argv[0], "no") != 0) {
+		return cmd_results_new(CMD_INVALID, "Expected layout_follow_output yes|no");
+	}
+	config->layout_follow_output = strcmp(argv[0], "yes") == 0;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_layout_default_height(int argc, char **argv) {
 	struct cmd_results *error;
 	if ((error = checkarg(argc, "layout_default_height", EXPECTED_AT_LEAST, 1))) {

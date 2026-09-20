@@ -31,6 +31,7 @@
 #include "sway/input/seat.h"
 #include "sway/scene_descriptor.h"
 #include "sway/server.h"
+#include "sway/sway_text_node.h"
 #include "sway/tree/arrange.h"
 #include "sway/tree/container.h"
 #include "sway/tree/view.h"
@@ -911,6 +912,13 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	if (!sway_assert(view->surface == NULL, "cannot map mapped view")) {
 		return;
 	}
+	// A client can remap the same view before its close animation finishes.
+	// Stop fading it out and keep subsequent unmaps from adding duplicates
+	// which would outlive the view after view_destroy removes one entry.
+	int index = list_find(root->unmapped_views, view);
+	if (index >= 0) {
+		list_del(root->unmapped_views, index);
+	}
 	view->lua.mapped = true;
 	view->surface = wlr_surface;
 	view_populate_pid(view);
@@ -1130,12 +1138,9 @@ void view_unmap(struct sway_view *view) {
 
 	layout_trail_remove_view(view);
 	focus_ring_remove_view(root->focus_ring, view);
-	struct sway_workspace *ws = view->container->pending.workspace;
-	if (ws && layout_workspace_get_align_container(ws) == view->container) {
-		layout_workspace_set_align(ws, ALIGN_NONE);
-	}
 
 	struct sway_container *parent = view->container->pending.parent;
+	struct sway_workspace *ws = view->container->pending.workspace;
 	const bool fullscreen = view->container->fullscreen;
 	list_add(root->unmapped_views, view);
 	view->container->pending.alpha = 0.0f;
@@ -1279,9 +1284,7 @@ void view_update_title(struct sway_view *view, bool force) {
 	}
 
 	free(view->container->title);
-	view->container->title = NULL;
-	free(view->container->pending.formatted_title);
-	view->container->pending.formatted_title = NULL;
+	free(view->container->formatted_title);
 
 	size_t len = parse_title_format(view->container, NULL);
 
@@ -1292,12 +1295,21 @@ void view_update_title(struct sway_view *view, bool force) {
 		}
 
 		parse_title_format(view->container, buffer);
-		view->container->pending.formatted_title = buffer;
+		view->container->formatted_title = buffer;
+	} else {
+		view->container->formatted_title = NULL;
 	}
 
 	view->container->title = title ? strdup(title) : NULL;
 
-	node_set_dirty(&view->container->node);
+	// Update title after the global font height is updated
+	if (view->container->title_bar.title_text && len) {
+		sway_text_node_set_text(view->container->title_bar.title_text,
+			view->container->formatted_title);
+		container_arrange_title_bar(view->container);
+	} else {
+		container_update_title_bar(view->container);
+	}
 
 	ipc_event_window(view->container, "title");
 
@@ -1608,12 +1620,12 @@ static void view_get_animation_sizes(struct sway_view *view, double *wt, double 
 	struct sway_container *con = view->container;
 	int border_horiz, border_vert;
 	container_get_borders(con, &border_horiz, &border_vert);
-	if (con->animation.w.animating || con->animation.h.animating) {
-		*wt = fmax(con->animation.w.xt - border_horiz, 0.0);
-		*ht = fmax(con->animation.h.xt - border_vert, 0.0);
+	if (animation_enabled()) {
+		*wt = fmax(con->animation.wt - border_horiz, 0.0);
+		*ht = fmax(con->animation.ht - border_vert, 0.0);
 	} else {
-		*wt = fmax(con->animation.w.x1 - border_horiz, 0.0);
-		*ht = fmax(con->animation.h.x1 - border_vert, 0.0);
+		*wt = fmax(con->animation.w1 - border_horiz, 0.0);
+		*ht = fmax(con->animation.h1 - border_vert, 0.0);
 	}
 }
 
@@ -1624,10 +1636,10 @@ void view_get_animation_scales(struct sway_view *view,
 		struct sway_container *con = view->container;
 		int border_horiz, border_vert;
 		container_get_borders(con, &border_horiz, &border_vert);
-		double w1 = con->animation.w.x1 - border_horiz;
-		double h1 = con->animation.h.x1 - border_vert;
-		double wt = con->animation.w.xt - border_horiz;
-		double ht = con->animation.h.xt - border_vert;
+		double w1 = con->animation.w1 - border_horiz;
+		double h1 = con->animation.h1 - border_vert;
+		double wt = con->animation.wt - border_horiz;
+		double ht = con->animation.ht - border_vert;
 		if (w1 > 0.0 && h1 > 0.0) {
 			*wscale = wt > 0.0 ? wt / w1 : 0.0;
 			*hscale = ht > 0.0 ? ht / h1 : 0.0;
@@ -1709,7 +1721,7 @@ double view_get_total_scale(struct sway_view *view) {
 		struct sway_workspace *ws = container->pending.workspace;
 		if (ws && ws->output) {
 			if (animation_animating_output(ws->output->wlr_output)) {
-				scale = ws->animation.s.xt;
+				scale = ws->animation.st;
 			} else {
 				scale = layout_scale_get(ws);
 			}
