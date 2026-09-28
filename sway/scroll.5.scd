@@ -707,9 +707,14 @@ set|plus|minus|toggle <amount>
 *move* left-or-to-workspace-prev|right-or-to-workspace-next|up-or-to-workspace-prev|down-or-to-workspace-next
 	Tries to move the focused container in the implied direction and, only
 	when it cannot move that way, carries it to the neighbouring workspace
-	on the same output (up/left to _prev_on_output_, down/right to
-	_next_on_output_) instead of doing nothing. Floating, fullscreen and
-	scratchpad containers behave exactly like the plain directional move.
+	on the same output instead of doing nothing. Declared workspaces are
+	included even when empty, and created only when selected. Numbered
+	workspaces are ordered numerically; named workspaces follow declaration
+	order, followed by undeclared existing names. Navigation wraps at the
+	ends and respects workspace output priorities. With no declared slots
+	on the output, up/left use _prev_on_output_ and down/right use
+	_next_on_output_. Floating, fullscreen and scratchpad containers behave
+	exactly like the plain directional move.
 	This is the shared fall-through behaviour Ciri carries natively as
 	_move-window-{up,down}-or-to-workspace-{up,down}_.
 

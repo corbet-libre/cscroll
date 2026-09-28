@@ -126,6 +126,10 @@ struct sway_workspace *workspace_next(struct sway_workspace *current);
 
 struct sway_workspace *workspace_output_prev(struct sway_workspace *current);
 
+// Caller owns the result. NULL means no configured workspace belongs to this output.
+char *workspace_output_configured_neighbor(struct sway_workspace *current,
+		bool next);
+
 struct sway_workspace *workspace_prev(struct sway_workspace *current);
 
 bool workspace_is_visible(struct sway_workspace *ws);

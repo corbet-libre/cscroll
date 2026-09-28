@@ -766,6 +766,63 @@ struct sway_workspace *workspace_output_prev(struct sway_workspace *current) {
 	return workspace_output_prev_next_impl(current->output, -1);
 }
 
+static int workspace_name_cmp(const void *left, const void *right) {
+	const char *a = *(const char **)left;
+	const char *b = *(const char **)right;
+	if (isdigit(a[0]) && isdigit(b[0])) {
+		long an = strtol(a, NULL, 10), bn = strtol(b, NULL, 10);
+		return (an > bn) - (an < bn);
+	}
+	return isdigit(b[0]) != 0 ? 1 : isdigit(a[0]) != 0 ? -1 : 0;
+}
+
+char *workspace_output_configured_neighbor(struct sway_workspace *current,
+		bool next) {
+	list_t *names = create_list();
+	for (int i = 0; i < config->workspace_configs->length; ++i) {
+		struct workspace_config *wsc = config->workspace_configs->items[i];
+		struct sway_workspace *ws = root_find_workspace(_workspace_by_name,
+				wsc->workspace);
+		// An existing workspace's actual output wins over its initial placement.
+		// For an empty slot, honour the first available output in its priority list.
+		if (ws ? ws->output == current->output :
+				workspace_valid_on_output(current->output->wlr_output->name,
+					wsc->workspace)) {
+			list_add(names, wsc->workspace);
+		}
+	}
+	if (names->length == 0) {
+		list_free(names);
+		return NULL;
+	}
+	// Include dynamically created workspaces without duplicating declared slots.
+	for (int i = 0; i < current->output->workspaces->length; ++i) {
+		struct sway_workspace *ws = current->output->workspaces->items[i];
+		bool present = false;
+		for (int j = 0; j < names->length; ++j) {
+			if (strcmp(names->items[j], ws->name) == 0) {
+				present = true;
+				break;
+			}
+		}
+		if (!present) {
+			list_add(names, ws->name);
+		}
+	}
+	// Match the output's numeric ordering; named slots retain declaration order.
+	list_stable_sort(names, workspace_name_cmp);
+	char *target = NULL;
+	for (int i = 0; i < names->length; ++i) {
+		if (strcmp(names->items[i], current->name) == 0) {
+			int index = wrap(i + (next ? 1 : -1), names->length);
+			target = strdup(names->items[index]);
+			break;
+		}
+	}
+	list_free(names);
+	return target;
+}
+
 struct sway_workspace *workspace_auto_back_and_forth(
 		struct sway_workspace *workspace) {
 	struct sway_seat *seat = input_manager_current_seat();

@@ -36,6 +36,9 @@ runtime or packages a helper that is tightly coupled to its runtime protocol.
   hotplug evacuation and restoration.
 - Automatically allocated workspace numbers respect output priorities too;
   absent preferred outputs leave those numbers available elsewhere.
+- Directional moves that fall through to another workspace include empty
+  declared workspace slots, using numeric/declaration order and the existing
+  output-priority rules. No workspace numbers or desktop policy are built in.
 
 The lifetime regressions use real Wayland clients and isolated headless Scroll
 instances. Run them on the build host with AddressSanitizer enabled:

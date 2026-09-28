@@ -579,8 +579,16 @@ static struct cmd_results *cmd_move_or_to_workspace(
 		return cmd_results_new(CMD_SUCCESS, NULL);
 	}
 
-	char *hop_argv[] = { "workspace", (char *)fallback_workspace };
-	return cmd_move_container(false, 2, hop_argv);
+	char *target = workspace_output_configured_neighbor(old_ws,
+			direction == DIR_RIGHT || direction == DIR_DOWN);
+	if (target && strcmp(target, old_ws->name) == 0) {
+		free(target);
+		return cmd_results_new(CMD_SUCCESS, NULL);
+	}
+	char *hop_argv[] = { "workspace", target ? target : (char *)fallback_workspace };
+	struct cmd_results *result = cmd_move_container(target != NULL, 2, hop_argv);
+	free(target);
+	return result;
 }
 
 static struct cmd_results *cmd_move_to_position_pointer(

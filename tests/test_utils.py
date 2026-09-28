@@ -2,6 +2,8 @@ import time
 import os
 import subprocess
 import re
+import socket
+import struct
 import pytest
 from typing import Generator, Any, Dict, Optional
 from contextlib import contextmanager
@@ -224,6 +226,7 @@ def run_compositor(
     env = os.environ.copy()
     env["HOME"] = str(temp_dir)
     env["WLR_BACKENDS"] = "headless"
+    env["WLR_RENDERER"] = "pixman"
 
     tests_dir = Path(__file__).parent.resolve()
     supp_path = tests_dir / "lsan.supp"
@@ -243,6 +246,8 @@ def run_compositor(
     if "WAYLAND_DISPLAY" in env:
         del env["WAYLAND_DISPLAY"]
 
+    runtime_dir = Path(env.get("XDG_RUNTIME_DIR", "/tmp"))
+    sockets_before = set(runtime_dir.glob("scroll-ipc.*.sock"))
     proc = subprocess.Popen(
         [binary_path, "-c", str(config_path), "-d"],
         env=env,
@@ -250,26 +255,28 @@ def run_compositor(
         stderr=subprocess.STDOUT,
     )
 
-    xdg_runtime_dir: str = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-    uid: int = os.getuid()
-    socket_path: str = os.path.join(
-        xdg_runtime_dir, f"scroll-ipc.{uid}.{proc.pid}.sock"
-    )
-
     ipc = None
     tries = 0
     while tries < 100:
-        if os.path.exists(socket_path):
+        for socket_path in set(runtime_dir.glob("scroll-ipc.*.sock")) - sockets_before:
             try:
-                ipc = ScrollIPC(socket_path)
-                break
-            except Exception:
+                candidate = ScrollIPC(str(socket_path))
+                peer_pid, peer_uid, _ = struct.unpack("3i", candidate.sock.getsockopt(
+                    socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+                if (peer_pid, peer_uid) == (proc.pid, os.getuid()):
+                    ipc = candidate
+                    break
+                candidate.close()
+            except OSError:
                 pass
+        if ipc or proc.poll() is not None:
+            break
         time.sleep(0.05)
         tries += 1
 
     if not ipc:
         proc.terminate()
+        proc.wait(timeout=5)
         log_file.close()
         print(f"Scroll log:\n{log_path.read_text()}")
         pytest.exit("Failed to connect to scroll IPC")
@@ -278,6 +285,7 @@ def run_compositor(
         yield ScrollInstance(proc, ipc, log_path, temp_dir)
     finally:
         # Teardown
+        ipc.close()
         proc.terminate()
         try:
             proc.wait(timeout=5)
