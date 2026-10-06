@@ -1,8 +1,24 @@
 schema = 1
 project = "cscroll"
 
-# IPC compatibility only. Full compositor runtime lives in pinned nixscroll native/VM gates; this product deliberately has no flake.
-
+# Legacy selector preserved verbatim from canonical HEAD so the existing
+# `.crow/ccid.yaml` (CHECKS default `ipc`) keeps working. The default
+# `verify` job below runs ALL original gates (runtime + ipc + manifest +
+# source-boundary); `ipc` remains callable for the legacy workflow.
 [checks.ipc]
 kind = "commands"
 commands = [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_swayipc_compat.py", "-v"]]
+
+[checks.verify]
+kind = "commands"
+commands = [["bash", ".ci/verify.sh"]]
+cache_tools = [["python3", "--version"], ["nix", "--version"], ["moon", "--version"], ["proto", "--version"]]
+
+[render]
+tool_revision = "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58"
+
+[jobs.verify]
+scheduler = "crow"
+checks = ["verify"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]
