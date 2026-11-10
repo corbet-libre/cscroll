@@ -160,6 +160,9 @@ list_t *layout_get_heights(struct sway_output *output);
 void layout_init(struct sway_workspace *workspace);
 void layout_set_type(struct sway_workspace *workspace, enum sway_container_layout type);
 enum sway_container_layout layout_get_type(struct sway_workspace *workspace);
+// Swap width and height fractions of the workspace's tiled containers and their windows.
+// Call it exactly when the layout axis changes (not when it is set to the type it already has).
+void layout_transpose_fractions(struct sway_workspace *workspace);
 
 // Toggle overview will only trigger a workspace arrangement where it will call
 // layout_overview_recompute_scale()

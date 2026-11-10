@@ -347,8 +347,14 @@ void output_add_workspace(struct sway_output *output,
 	// here. The fallback output is only storage while no real output is enabled.
 	if (config->layout_follow_output && output != root->fallback_output) {
 		enum sway_container_layout type = output_get_default_layout(output);
+		const bool axis_changes = layout_get_type(workspace) != type;
 		layout_set_type(workspace, type);
 		workspace->layout.modifiers.mode = type;
+		if (axis_changes) {
+			// Sizes transpose with the axis, or a column made for a landscape output
+			// becomes a half-width, full-height row on a portrait one.
+			layout_transpose_fractions(workspace);
+		}
 		for (int i = 0; i < workspace->tiling->length; ++i) {
 			struct sway_container *con = workspace->tiling->items[i];
 			con->pending.layout = type == L_HORIZ ? L_VERT : L_HORIZ;

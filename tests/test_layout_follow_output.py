@@ -155,3 +155,95 @@ workspace 0
                 f"return scroll.workspace_get_layout_type({ws})"
             ) == "horizontal"
             assert compositor.execute_lua(f"return scroll.view_get_container({view})")
+
+
+def _container_and_window(compositor, title):
+    """The tiled window called `title` and the container that holds it, from the live tree."""
+    found = []
+
+    def walk(node, parent):
+        if node.get("name") == title and node.get("pid") is not None:
+            found.append((parent, node))
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            walk(child, node)
+
+    walk(compositor.get_tree(), None)
+    assert len(found) == 1, f"expected exactly one window titled {title!r}, found {len(found)}"
+    return found[0]
+
+
+def _fractions(compositor, title):
+    parent, window = _container_and_window(compositor, title)
+    return (
+        (parent["width_fraction"], parent["height_fraction"]),
+        (window["width_fraction"], window["height_fraction"]),
+    )
+
+
+def test_follow_output_transposes_sizes(scroll_compositor_binary, tmp_path):
+    """A workspace that moves onto a portrait output reflows like one that lives there natively.
+
+    layout_follow_output used to flip the axis and the containers' layout but leave every size
+    fraction alone: a column made on a landscape output (0.5 wide, 1.0 high) stayed 0.5 by 1.0 as a
+    row of the portrait output, where its own windows are 1.0 by 0.5 -- half the width of the
+    screen and one window per screen height (the Elitebook's messengers on the pivoted HP).
+    """
+    config = """xwayland disable
+animations enabled no
+default_orientation horizontal
+layout_follow_output yes
+output HEADLESS-2 layout_type vertical
+output HEADLESS-2 layout_default_width 1.0
+output HEADLESS-2 layout_default_height 0.5
+workspace 1 output HEADLESS-2
+workspace 0
+"""
+    with run_compositor(scroll_compositor_binary, tmp_path, config) as compositor:
+        compositor.ipc.sock.settimeout(10)
+        compositor.cmd("create_output")
+        compositor.wait_for_idle()
+        with ExitStack() as clients:
+            # Made on the landscape output: the horizontal defaults (0.5 by 1.0).
+            compositor.cmd("workspace 0")
+            clients.enter_context(wayland_client(compositor, "landscape-made"))
+            wait_for_client_map(compositor, "landscape-made")
+            made_on_landscape = _fractions(compositor, "landscape-made")
+            assert made_on_landscape == ((0.5, 1.0), (0.5, 1.0))
+
+            # Made natively on the portrait output: the vertical defaults (1.0 by 0.5).
+            compositor.cmd("workspace 1")
+            clients.enter_context(wayland_client(compositor, "portrait-made"))
+            wait_for_client_map(compositor, "portrait-made")
+            native = _fractions(compositor, "portrait-made")
+            assert native == ((1.0, 0.5), (1.0, 0.5))
+
+            # Workspace 0 moves onto the portrait output: its window must look like the native one.
+            compositor.cmd("workspace 0; move workspace to output HEADLESS-2")
+            compositor.wait_for_idle()
+            assert _fractions(compositor, "landscape-made") == native
+
+            # ...and back: the transposition is its own inverse, so nothing drifts.
+            compositor.cmd("move workspace to output HEADLESS-1")
+            compositor.wait_for_idle()
+            assert _fractions(compositor, "landscape-made") == made_on_landscape
+            assert compositor.proc.poll() is None
+
+
+def test_same_axis_move_keeps_sizes(scroll_compositor_binary, tmp_path):
+    """Moving between two outputs of the same axis changes no size."""
+    config = """xwayland disable
+animations enabled no
+default_orientation horizontal
+layout_follow_output yes
+workspace 0
+"""
+    with run_compositor(scroll_compositor_binary, tmp_path, config) as compositor:
+        compositor.ipc.sock.settimeout(10)
+        compositor.cmd("create_output")
+        compositor.wait_for_idle()
+        with wayland_client(compositor, "stays-put"):
+            wait_for_client_map(compositor, "stays-put")
+            before = _fractions(compositor, "stays-put")
+            compositor.cmd("workspace 0; move workspace to output HEADLESS-2")
+            compositor.wait_for_idle()
+            assert _fractions(compositor, "stays-put") == before

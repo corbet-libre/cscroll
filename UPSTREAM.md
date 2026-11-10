@@ -33,7 +33,9 @@ runtime or packages a helper that is tightly coupled to its runtime protocol.
   would reference freed views after repeated unmap/remap cycles.
 - Opt-in `layout_follow_output` makes workspace moves follow the destination
   layout for both existing tiled windows and future insertion, including
-  hotplug evacuation and restoration.
+  hotplug evacuation and restoration. The size fractions transpose with the
+  axis (columns become rows, width becomes height), so a moved window looks
+  like one made natively on the destination output.
 - Automatically allocated workspace numbers respect output priorities too;
   absent preferred outputs leave those numbers available elsewhere.
 - Directional moves that fall through to another workspace include empty

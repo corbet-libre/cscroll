@@ -96,6 +96,35 @@ enum sway_container_layout layout_get_type(struct sway_workspace *workspace) {
 	return workspace->layout.type;
 }
 
+static void container_swap_fractions(struct sway_container *con) {
+	double tmp = con->width_fraction;
+	con->width_fraction = con->height_fraction;
+	con->height_fraction = tmp;
+	tmp = con->toggle_size.saved_width_fraction;
+	con->toggle_size.saved_width_fraction = con->toggle_size.saved_height_fraction;
+	con->toggle_size.saved_height_fraction = tmp;
+}
+
+// A workspace whose axis flips (layout_follow_output, on a move between a landscape and a
+// portrait output) must flip the size fractions with it. The layout type and the containers'
+// own layout are transposed, but a column of width 0.5 and height 1.0 would stay 0.5 by 1.0
+// as a row: half the width of the screen and a whole screen along the scrolling direction,
+// where the destination output's own windows are layout_default_width wide and
+// layout_default_height high (1.0 by 0.5 on a portrait output that declares so). Columns
+// become rows and width becomes height, so every tiled container and every window directly
+// inside it swaps its two fractions, keeping the windows' relative sizes.
+void layout_transpose_fractions(struct sway_workspace *workspace) {
+	for (int i = 0; i < workspace->tiling->length; ++i) {
+		struct sway_container *con = workspace->tiling->items[i];
+		container_swap_fractions(con);
+		if (con->pending.children) {
+			for (int j = 0; j < con->pending.children->length; ++j) {
+				container_swap_fractions(con->pending.children->items[j]);
+			}
+		}
+	}
+}
+
 static void set_view_dirty(struct sway_container *container, void *data) {
 	if (container->view) {
 		node_set_dirty(&container->node);
